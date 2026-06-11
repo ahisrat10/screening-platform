@@ -13,12 +13,13 @@ const CONFIG = {
     SNAPSHOT_INTERVAL_MS:      30000,   // Send code every 30s
     HEARTBEAT_INTERVAL_MS:     10000,   // Heartbeat every 10s
     IDLE_TIMEOUT_MS:           60000,   // 60s no typing = idle
-    PASTE_CHAR_THRESHOLD:      50,      // 50+ chars at once = paste
+    PASTE_CHAR_THRESHOLD:      30,      // 50+ chars at once = paste (Fix 2: raised from 30)
     RAPID_TAB_COUNT:           3,       // 3 switches in window = suspicious
     RAPID_TAB_WINDOW_MS:       30000,   // 30s window for tab tracking
     AI_WATCHING_SPEED:         8,       // chars/sec = suspiciously fast
     BURST_WINDOW_MS:           3000,    // 3s window for burst analysis
     LONG_ABSENCE_THRESHOLD_MS: 30000,   // 30s away = suspicious
+    RECONNECT_INTERVAL_MS:     5000,    // (Fix 2) retry interval
 };
 
 // ── GLOBAL STATE ───────────────────────────────────────────────
@@ -111,6 +112,7 @@ function activate(context) {
             studentId        = id.trim();
             isConnected      = true;
             suspiciousScore  = 0;
+            serverReachable  = true;  // reset on fresh login
             sessionStats = {
                 totalKeystrokes:  0,
                 totalPastes:      0,
@@ -163,11 +165,11 @@ function activate(context) {
                 student_id:       studentId,
                 suspicious_score: suspiciousScore,
                 session_summary: {
-                    duration:         getSessionDuration(),
-                    total_keystrokes: sessionStats.totalKeystrokes,
-                    total_pastes:     sessionStats.totalPastes,
+                    duration:           getSessionDuration(),
+                    total_keystrokes:   sessionStats.totalKeystrokes,
+                    total_pastes:       sessionStats.totalPastes,
                     total_tab_switches: sessionStats.totalTabSwitches,
-                    suspicious_events: sessionStats.suspiciousEvents.length,
+                    suspicious_events:  sessionStats.suspiciousEvents.length,
                 },
                 timestamp: new Date().toISOString(),
             });
@@ -251,9 +253,9 @@ function activate(context) {
                         event_type: 'PASTE_DETECTED',
                         severity:   'HIGH',
                         details: {
-                            chars_pasted:   textLength,
-                            paste_preview:  preview,
-                            total_pastes:   sessionStats.totalPastes,
+                            chars_pasted:     textLength,
+                            paste_preview:    preview,
+                            total_pastes:     sessionStats.totalPastes,
                             suspicious_score: suspiciousScore,
                         },
                         timestamp: new Date().toISOString(),
@@ -479,46 +481,75 @@ function sendCodeSnapshot() {
 }
 
 // ══════════════════════════════════════════════════════════════
-// ANALYZE CODE FOR AI PATTERNS
+// ANALYZE CODE FOR AI PATTERNS  (Fix 3 — stronger detection)
 // ══════════════════════════════════════════════════════════════
 function analyzeCodeForAIPatterns(code) {
     const lines = code.split('\n');
 
-    // Count comment lines
+    // ── Check 1: Comment ratio ────────────────────────────────
     const commentLines = lines.filter(l =>
         l.trim().startsWith('//') ||
         l.trim().startsWith('#')  ||
         l.trim().startsWith('/*') ||
         l.trim().startsWith('*')
     ).length;
-
     const commentRatio = lines.length > 0
-        ? (commentLines / lines.length)
-        : 0;
+        ? commentLines / lines.length : 0;
 
-    // AI-style variable names
-    const aiVarPattern = /\b(result|output|data|value|item|element|node|temp|current|previous|index|count|total|sum|average|maximum|minimum|iterator|container|handler|callback|response|request)\b/g;
+    // ── Check 2: AI-style variable names ─────────────────────
+    const aiVarPattern = /\b(result|output|data|value|item|element|node|temp|current|previous|index|count|total|sum|average|maximum|minimum|iterator|container|handler|callback|response|request|target|source|destination|payload|buffer|cache|queue|stack|heap|graph|matrix|vector|tensor)\b/g;
     const aiVarCount   = (code.match(aiVarPattern) || []).length;
 
-    // Excessive whitespace/formatting (AI tends to format perfectly)
-    const emptyLines      = lines.filter(l => l.trim() === '').length;
-    const emptyLineRatio  = lines.length > 0
-        ? (emptyLines / lines.length)
-        : 0;
+    // ── Check 3: Perfect formatting (AI always formats well) ──
+    const emptyLines     = lines.filter(l => l.trim() === '').length;
+    const emptyLineRatio = lines.length > 0
+        ? emptyLines / lines.length : 0;
 
+    // ── Check 4: Docstring presence (AI loves docstrings) ─────
+    const hasDocstrings = /"""[\s\S]*?"""|\/\*\*[\s\S]*?\*\//.test(code);
+
+    // ── Check 5: Consistent indentation (AI is always consistent)
+    const indentedLines = lines.filter(l => l.startsWith('    ') || l.startsWith('\t'));
+    const indentRatio   = lines.length > 0
+        ? indentedLines.length / lines.length : 0;
+
+    // ── Check 6: Long descriptive function names (AI tendency) ─
+    const longFuncNames = (code.match(/def [a-z][a-z_]{10,}|function [a-z][a-zA-Z]{10,}/g) || []).length;
+
+    // ── Check 7: No typos/abbreviations (humans make typos) ───
+    const typoPattern   = /\b(cnt|idx|tmp|val|arr|lst|dct|func|var|str|num|calc|res|ret)\b/g;
+    const humanVarCount = (code.match(typoPattern) || []).length;
+
+    // ── Build flags ───────────────────────────────────────────
     const flags = [];
-    if (commentRatio > 0.3)    flags.push('EXCESSIVE_COMMENTS');
-    if (aiVarCount > 5)        flags.push('AI_VARIABLE_NAMES');
-    if (emptyLineRatio > 0.25) flags.push('EXCESSIVE_FORMATTING');
+    if (commentRatio > 0.3)                              flags.push('EXCESSIVE_COMMENTS');
+    if (aiVarCount > 5)                                  flags.push('AI_VARIABLE_NAMES');
+    if (emptyLineRatio > 0.25)                           flags.push('PERFECT_FORMATTING');
+    if (hasDocstrings)                                   flags.push('HAS_DOCSTRINGS');
+    if (longFuncNames > 2)                               flags.push('LONG_FUNCTION_NAMES');
+    if (humanVarCount === 0 && lines.length > 10)        flags.push('NO_HUMAN_SHORTCUTS');
+
+    // ── Calculate AI suspicion score (0–100) ──────────────────
+    const aiScore = Math.min(100,
+        (commentRatio > 0.3                       ? 20 : 0) +
+        (aiVarCount > 5                           ? 20 : 0) +
+        (hasDocstrings                            ? 20 : 0) +
+        (emptyLineRatio > 0.25                    ? 15 : 0) +
+        (longFuncNames > 2                        ? 15 : 0) +
+        (humanVarCount === 0 && lines.length > 10 ? 10 : 0)
+    );
 
     return {
         total_lines:       lines.length,
-        comment_lines:     commentLines,
         comment_ratio:     commentRatio.toFixed(2),
         ai_variable_count: aiVarCount,
-        empty_line_ratio:  emptyLineRatio.toFixed(2),
+        human_var_count:   humanVarCount,
+        has_docstrings:    hasDocstrings,
+        long_func_names:   longFuncNames,
+        indent_ratio:      indentRatio.toFixed(2),
         ai_flags:          flags,
-        ai_suspicion:      flags.length > 0,
+        ai_score:          aiScore,
+        likely_ai_written: aiScore >= 40,
     };
 }
 
@@ -644,6 +675,13 @@ function updateStatusBar(status) {
             statusBarItem.tooltip = 'You appear idle — start coding!';
             statusBarItem.command = 'code-monitor.status';
             break;
+
+        case 'server-down':
+            statusBarItem.text    = `$(sync~spin) Monitor: ${studentId} — Reconnecting...`;
+            statusBarItem.color   = '#F44336'; // red
+            statusBarItem.tooltip = 'Lost connection to exam server — retrying...';
+            statusBarItem.command = 'code-monitor.status';
+            break;
     }
 }
 
@@ -658,15 +696,21 @@ function getSessionDuration() {
     return `${minutes}m ${seconds}s`;
 }
 
+// ══════════════════════════════════════════════════════════════
+// SEND TO SERVER — with auto-reconnection  (Fix 2)
+// ══════════════════════════════════════════════════════════════
+let serverReachable = true;
+let reconnectTimer  = null;
+
 function sendToServer(endpoint, data) {
     if (!data) return;
 
     const jsonData = JSON.stringify(data);
     const options  = {
-        hostname:        CONFIG.SERVER_HOST,
-        port:            CONFIG.SERVER_PORT,
-        path:            endpoint,
-        method:          'POST',
+        hostname: CONFIG.SERVER_HOST,
+        port:     CONFIG.SERVER_PORT,
+        path:     endpoint,
+        method:   'POST',
         headers: {
             'Content-Type':   'application/json',
             'Content-Length': Buffer.byteLength(jsonData),
@@ -677,6 +721,21 @@ function sendToServer(endpoint, data) {
         let body = '';
         res.on('data', chunk => body += chunk);
         res.on('end', () => {
+            // Server is back online — clear reconnect state
+            if (!serverReachable) {
+                serverReachable = true;
+                if (reconnectTimer) {
+                    clearInterval(reconnectTimer);
+                    reconnectTimer = null;
+                }
+                updateStatusBar('connected');
+                if (isConnected) {
+                    vscode.window.showInformationMessage(
+                        '✅ Reconnected to exam server!'
+                    );
+                }
+            }
+
             if (res.statusCode !== 200) {
                 console.log(`[${endpoint}] Server responded: ${res.statusCode}`);
             }
@@ -684,8 +743,33 @@ function sendToServer(endpoint, data) {
     });
 
     req.on('error', (err) => {
-        // Backend not running yet — suppress noisy errors
-        if (err.code !== 'ECONNREFUSED') {
+        if (err.code === 'ECONNREFUSED') {
+            if (serverReachable) {
+                // First time noticing server is down
+                serverReachable = false;
+                console.log('⚠️ Server unreachable. Will retry automatically...');
+
+                if (isConnected) {
+                    updateStatusBar('server-down');
+                    vscode.window.showWarningMessage(
+                        '⚠️ Lost connection to exam server. Retrying every 5s...'
+                    );
+                }
+
+                // Start a periodic reconnect probe (ping heartbeat endpoint)
+                if (!reconnectTimer) {
+                    reconnectTimer = setInterval(() => {
+                        if (!isConnected) {
+                            clearInterval(reconnectTimer);
+                            reconnectTimer = null;
+                            return;
+                        }
+                        // Probe server with a lightweight heartbeat
+                        sendHeartbeat();
+                    }, CONFIG.RECONNECT_INTERVAL_MS);
+                }
+            }
+        } else {
             console.error(`[${endpoint}] Error: ${err.message}`);
         }
     });
@@ -698,6 +782,7 @@ function sendToServer(endpoint, data) {
 // ══════════════════════════════════════════════════════════════
 function deactivate() {
     stopMonitoring();
+    if (reconnectTimer) clearInterval(reconnectTimer);
     if (statusBarItem) statusBarItem.dispose();
 }
 
