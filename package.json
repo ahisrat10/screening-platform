@@ -1,7 +1,7 @@
 {
     "name": "code-monitor",
     "displayName": "Code Monitor",
-    "description": "Automated Technical Screening Platform - Student Monitor",
+    "description": "Automated Technical Screening Platform — Student Monitor",
     "version": "1.0.0",
     "publisher": "screening-platform",
     "engines": {
@@ -27,8 +27,7 @@
         ]
     },
     "scripts": {
-        "lint": "eslint .",
-        "pretest": "npm run lint"
+        "lint": "eslint ."
     },
     "devDependencies": {
         "@types/vscode": "^1.85.0",
