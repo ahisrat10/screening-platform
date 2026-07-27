@@ -7,3 +7,7 @@ passlib[bcrypt]==1.7.4
 python-dotenv==1.0.1
 python-multipart==0.0.9
 pydantic[email]==2.6.1
+scikit-learn==1.6.1
+xgboost>=2.0
+torch>=2.2
+numpy>=1.26

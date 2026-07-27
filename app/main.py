@@ -107,17 +107,11 @@ def register(data: schemas.RegisterRequest, db: Session = Depends(get_db)):
     if db.query(models.User).filter(
         models.User.student_id == data.student_id
     ).first():
-        raise HTTPException(
-            status_code=400,
-            detail="Student ID already registered"
-        )
+        raise HTTPException(status_code=400, detail="Student ID already registered")
     if db.query(models.User).filter(
         models.User.email == data.email
     ).first():
-        raise HTTPException(
-            status_code=400,
-            detail="Email already registered"
-        )
+        raise HTTPException(status_code=400, detail="Email already registered")
     user = models.User(
         student_id    = data.student_id,
         email         = data.email,
@@ -129,10 +123,7 @@ def register(data: schemas.RegisterRequest, db: Session = Depends(get_db)):
     db.add(user)
     db.commit()
     send_welcome_email(data.email, data.student_id, data.full_name)
-    return {
-        "message": f"Account created! Welcome {data.full_name}",
-        "success": True
-    }
+    return {"message": f"Account created! Welcome {data.full_name}", "success": True}
 
 
 @app.post("/auth/register-admin", response_model=schemas.MessageResponse)
@@ -140,17 +131,11 @@ def register_admin(data: schemas.RegisterRequest, db: Session = Depends(get_db))
     if db.query(models.User).filter(
         models.User.student_id == data.student_id
     ).first():
-        raise HTTPException(
-            status_code=400,
-            detail="This ID is already registered"
-        )
+        raise HTTPException(status_code=400, detail="This ID is already registered")
     if db.query(models.User).filter(
         models.User.email == data.email
     ).first():
-        raise HTTPException(
-            status_code=400,
-            detail="Email already registered"
-        )
+        raise HTTPException(status_code=400, detail="Email already registered")
     admin = models.User(
         student_id    = data.student_id,
         email         = data.email,
@@ -161,10 +146,7 @@ def register_admin(data: schemas.RegisterRequest, db: Session = Depends(get_db))
     )
     db.add(admin)
     db.commit()
-    return {
-        "message": f"Admin account created for {data.full_name}!",
-        "success": True
-    }
+    return {"message": f"Admin account created for {data.full_name}!", "success": True}
 
 
 @app.post("/auth/login", response_model=schemas.TokenResponse)
@@ -174,10 +156,7 @@ def login(data: schemas.LoginRequest, db: Session = Depends(get_db)):
     ).first()
 
     if not user:
-        raise HTTPException(
-            status_code=401,
-            detail="Invalid Student ID or password"
-        )
+        raise HTTPException(status_code=401, detail="Invalid Student ID or password")
 
     if user.locked_until and user.locked_until > datetime.utcnow():
         raise HTTPException(
@@ -218,30 +197,21 @@ def login(data: schemas.LoginRequest, db: Session = Depends(get_db)):
 
 
 @app.post("/auth/forgot-password", response_model=schemas.MessageResponse)
-def forgot_password(
-    data: schemas.ForgotPasswordRequest,
-    db:   Session = Depends(get_db)
-):
+def forgot_password(data: schemas.ForgotPasswordRequest, db: Session = Depends(get_db)):
     user = db.query(models.User).filter(
         models.User.student_id == data.student_id,
         models.User.email      == data.email
     ).first()
 
     if not user:
-        raise HTTPException(
-            status_code=404,
-            detail="No account found with this Student ID and email"
-        )
+        raise HTTPException(status_code=404, detail="No account found with this Student ID and email")
 
     otp  = generate_otp()
     save_otp(data.student_id, data.email, otp, db)
     sent = send_otp_email(data.email, data.student_id, otp)
 
     if not sent:
-        raise HTTPException(
-            status_code=500,
-            detail="Failed to send OTP email. Please try again."
-        )
+        raise HTTPException(status_code=500, detail="Failed to send OTP email. Please try again.")
 
     masked = f"{data.email[:3]}***{data.email[data.email.index('@'):]}"
     return {"message": f"OTP sent to {masked}", "success": True}
@@ -330,15 +300,19 @@ def student_connect(
         models.StudentSession.student_id == data.student_id
     ).first()
 
+    now = datetime.utcnow()   # ← single timestamp for consistency
+
     if session:
         session.is_connected     = True
-        session.connected_at     = datetime.utcnow()
+        session.connected_at     = now
+        session.last_heartbeat   = now   # ← KEY FIX: reset stale heartbeat
         session.suspicious_score = 0
     else:
         session = models.StudentSession(
             student_id       = data.student_id,
             is_connected     = True,
-            connected_at     = datetime.utcnow(),
+            connected_at     = now,
+            last_heartbeat   = now,      # ← KEY FIX: set from start
             suspicious_score = 0
         )
         db.add(session)
@@ -511,6 +485,16 @@ def heartbeat(
     if session:
         session.last_heartbeat   = datetime.utcnow()
         session.suspicious_score = data.suspicious_score
+        session.is_connected     = True
+    else:
+        session = models.StudentSession(
+            student_id       = data.student_id,
+            is_connected     = True,
+            connected_at     = datetime.utcnow(),
+            last_heartbeat   = datetime.utcnow(),
+            suspicious_score = data.suspicious_score
+        )
+        db.add(session)
 
     db.commit()
 
@@ -542,22 +526,24 @@ def my_status(student_id: str, db: Session = Depends(get_db)):
             "stats":            None
         }
 
+    # ── Heartbeat timeout check ────────────────────────────────
     actually_connected = False
-    if session.is_connected and session.last_heartbeat:
-        diff = datetime.utcnow() - session.last_heartbeat
-        if diff.total_seconds() < 30:
+
+    if session.last_heartbeat:
+        seconds_since = (datetime.utcnow() - session.last_heartbeat).total_seconds()
+        if seconds_since < 30:
             actually_connected = True
+            if not session.is_connected:
+                session.is_connected = True
+                db.commit()
         else:
-            session.is_connected = False
-            db.commit()
-    elif session.is_connected and not session.last_heartbeat:
-        if session.connected_at:
-            diff = datetime.utcnow() - session.connected_at
-            if diff.total_seconds() < 15:
-                actually_connected = True
-            else:
+            if session.is_connected:
                 session.is_connected = False
                 db.commit()
+    elif session.connected_at:
+        seconds_since_connect = (datetime.utcnow() - session.connected_at).total_seconds()
+        if seconds_since_connect < 15:
+            actually_connected = True
 
     latest_hb = db.query(models.Heartbeat).filter(
         models.Heartbeat.student_id == student_id
@@ -581,10 +567,10 @@ def my_status(student_id: str, db: Session = Depends(get_db)):
         "is_connected":     actually_connected,
         "suspicious_score": session.suspicious_score,
         "last_heartbeat":   str(session.last_heartbeat) if session.last_heartbeat else None,
-        "connected_at":     str(session.connected_at) if session.connected_at else None,
+        "connected_at":     str(session.connected_at)   if session.connected_at   else None,
         "stats": {
-            "is_typing":    latest_hb.is_typing if latest_hb else False,
-            "is_idle":      latest_hb.is_idle if latest_hb else False,
+            "is_typing":    latest_hb.is_typing    if latest_hb else False,
+            "is_idle":      latest_hb.is_idle      if latest_hb else False,
             "paste_count":  paste_count,
             "tab_switches": tab_count,
             "snapshots":    snap_count,
@@ -592,22 +578,279 @@ def my_status(student_id: str, db: Session = Depends(get_db)):
     }
 
 # ══════════════════════════════════════════════════════════════
+# AI DETECTION ROUTE
+# ══════════════════════════════════════════════════════════════
+
+def _deviation(current: float, baseline: float) -> float:
+    if not baseline:
+        return 0.0
+    return abs(current - baseline) / abs(baseline)
+
+
+def _rolling(old: float, new: float, n: int) -> float:
+    old = old or 0.0
+    return old + (new - old) / n
+
+
+def _update_student_profile(db: Session, student_id: str, code_features: dict, behavioral: dict):
+    profile = db.query(models.StudentProfile).filter(
+        models.StudentProfile.student_id == student_id
+    ).first()
+    if not profile:
+        profile = models.StudentProfile(student_id=student_id)
+        db.add(profile)
+        db.flush()
+
+    n = (profile.submission_count or 0) + 1
+
+    current_id_len  = code_features.get("avg_identifier_len", 0.0)
+    current_comment = code_features.get("comment_ratio", 0.0)
+    current_typing  = behavioral.get("typing_ratio", 0.0)
+
+    if n > 1:
+        profile.current_id_len_deviation  = _deviation(current_id_len, profile.avg_identifier_len_baseline)
+        profile.current_comment_deviation = _deviation(current_comment, profile.comment_ratio_baseline)
+        profile.current_typing_deviation  = _deviation(current_typing, profile.typing_ratio_baseline)
+        profile.current_style_change_score = (
+            profile.current_id_len_deviation
+            + profile.current_comment_deviation
+            + profile.current_typing_deviation
+        ) / 3
+
+    profile.avg_identifier_len_baseline = _rolling(profile.avg_identifier_len_baseline, current_id_len, n)
+    profile.comment_ratio_baseline      = _rolling(profile.comment_ratio_baseline, current_comment, n)
+    profile.typing_ratio_baseline       = _rolling(profile.typing_ratio_baseline, current_typing, n)
+    profile.keys_per_minute_baseline    = _rolling(profile.keys_per_minute_baseline, behavioral.get("keys_per_minute", 0.0), n)
+    profile.backspace_freq_baseline     = _rolling(profile.backspace_freq_baseline, behavioral.get("backspace_frequency", 0.0), n)
+    profile.indent_std_baseline         = _rolling(profile.indent_std_baseline, code_features.get("indent_std", 0.0), n)
+    profile.avg_line_len_baseline       = _rolling(profile.avg_line_len_baseline, code_features.get("avg_line_len", 0.0), n)
+
+    profile.submission_count = n
+    db.commit()
+
+
+@app.post("/analyze/ai-detection", response_model=schemas.AIDetectionResponse)
+def analyze_ai_detection(
+    data:             schemas.AIDetectionRequest,
+    db:               Session = Depends(get_db),
+    token_student_id: str     = Depends(get_student_from_token)
+):
+    from .ml.model_loader import predict_ai_detection
+
+    student_id      = data.student_id or token_student_id
+    behavioral_dict = data.behavioral.model_dump()
+
+    result = predict_ai_detection(
+        code               = data.code,
+        language           = data.language,
+        behavioral_signals = behavioral_dict,
+    )
+    code_features = result.get("code_features") or {}
+
+    active_exam_session = db.query(models.ExamSession).filter(
+        models.ExamSession.student_id == student_id,
+        models.ExamSession.is_active  == True
+    ).order_by(models.ExamSession.session_start.desc()).first()
+
+    behavioral_row = models.BehavioralData(
+        student_id      = student_id,
+        exam_session_id = active_exam_session.id if active_exam_session else None,
+        raw_events      = behavioral_dict,
+        **{col: behavioral_dict.get(col, 0) for col in models.BEHAVIORAL_FEATURE_COLUMNS}
+    )
+    db.add(behavioral_row)
+    db.flush()
+
+    submission = models.Submission(
+        student_id         = student_id,
+        language           = data.language,
+        code               = data.code,
+        exam_session_id    = active_exam_session.id if active_exam_session else None,
+        ai_prediction      = result["prediction"],
+        ai_confidence      = result["confidence"],
+        ai_probability     = result["ai_probability"],
+        model_scores       = result["model_scores"],
+        code_features      = code_features,
+        behavioral_data_id = behavioral_row.id,
+    )
+    db.add(submission)
+    db.flush()
+
+    behavioral_row.submission_id = submission.id
+    db.commit()
+
+    _update_student_profile(db, student_id, code_features, behavioral_dict)
+
+    broadcast_event({
+        "type":       "AI_DETECTION_RESULT",
+        "student_id": student_id,
+        "prediction": result["prediction"],
+        "confidence": result["confidence"],
+        "severity":   "HIGH" if result["prediction"] == "AI" and result["confidence"] >= 0.7 else "INFO",
+        "message":    f"🤖 AI-detection: {result['prediction']} ({result['confidence']*100:.1f}%)",
+        "timestamp":  data.timestamp,
+    })
+
+    return result
+
+# ══════════════════════════════════════════════════════════════
+# TEACHER FEEDBACK ROUTE
+# ══════════════════════════════════════════════════════════════
+
+@app.post("/teacher/feedback", response_model=schemas.TeacherFeedbackResponse)
+def submit_teacher_feedback(
+    data:         schemas.TeacherFeedbackRequest,
+    db:           Session = Depends(get_db),
+    current_user = Depends(auth.get_admin_user)
+):
+    import hashlib
+
+    submission = db.query(models.Submission).filter(
+        models.Submission.id == data.submission_id
+    ).first()
+    if not submission:
+        raise HTTPException(status_code=404, detail="Submission not found")
+
+    feedback = models.TeacherFeedback(
+        submission_id    = submission.id,
+        student_id       = submission.student_id,
+        teacher_id       = current_user.student_id,
+        model_prediction = submission.ai_prediction,
+        teacher_label    = data.teacher_label,
+        confidence       = submission.ai_confidence,
+        notes            = data.notes,
+        is_processed     = False,
+    )
+    db.add(feedback)
+
+    if submission.ai_prediction and submission.ai_prediction != data.teacher_label and submission.code:
+        code_hash = hashlib.sha256(submission.code.encode("utf-8")).hexdigest()
+
+        existing = db.query(models.CorrectionMemory).filter(
+            models.CorrectionMemory.code_hash == code_hash
+        ).first()
+
+        if existing:
+            existing.original_pred   = submission.ai_prediction
+            existing.corrected_label = data.teacher_label
+            existing.corrected_by    = current_user.student_id
+        else:
+            db.add(models.CorrectionMemory(
+                code_hash       = code_hash,
+                original_pred   = submission.ai_prediction,
+                corrected_label = data.teacher_label,
+                corrected_by    = current_user.student_id,
+            ))
+
+    db.commit()
+
+    return {
+        "message":       "Feedback recorded",
+        "submission_id": submission.id,
+        "teacher_label": data.teacher_label,
+    }
+
+# ══════════════════════════════════════════════════════════════
+# PHASE 4: CODE EXECUTION ROUTES
+# ══════════════════════════════════════════════════════════════
+
+@app.post("/code/execute")
+def execute_code_endpoint(
+    data: schemas.CodeExecuteRequest,
+    db:   Session = Depends(get_db)
+):
+    from .docker_service import execute_code
+
+    result = execute_code(
+        code     = data.code,
+        language = data.language,
+        stdin    = data.stdin or "",
+    )
+
+    submission = models.Submission(
+        student_id     = data.student_id or "anonymous",
+        language       = data.language,
+        code           = data.code,
+        output         = result["output"],
+        error          = result["error"],
+        is_successful  = result["success"],
+        execution_time = result["execution_time"],
+    )
+    db.add(submission)
+    db.commit()
+    db.refresh(submission)
+
+    if data.student_id:
+        broadcast_event({
+            "type":           "CODE_EXECUTED",
+            "student_id":     data.student_id,
+            "language":       data.language,
+            "success":        result["success"],
+            "execution_time": result["execution_time"],
+            "message":        f"{'✅' if result['success'] else '❌'} {data.student_id} ran {data.language} code ({result['execution_time']}s)",
+            "timestamp":      data.timestamp or datetime.utcnow().isoformat(),
+        })
+
+    return {
+        "success":        result["success"],
+        "output":         result["output"],
+        "error":          result["error"],
+        "execution_time": result["execution_time"],
+        "language":       result["language"],
+        "submission_id":  submission.id,
+    }
+
+
+@app.get("/code/result/{submission_id}")
+def get_result(submission_id: int, db: Session = Depends(get_db)):
+    sub = db.query(models.Submission).filter(
+        models.Submission.id == submission_id
+    ).first()
+
+    if not sub:
+        raise HTTPException(status_code=404, detail="Submission not found")
+
+    return {
+        "id":             sub.id,
+        "student_id":     sub.student_id,
+        "language":       sub.language,
+        "code":           sub.code,
+        "output":         sub.output,
+        "error":          sub.error,
+        "is_successful":  sub.is_successful,
+        "execution_time": sub.execution_time,
+        "timestamp":      str(sub.timestamp),
+    }
+
+
+@app.get("/admin/submissions")
+def get_all_submissions(db: Session = Depends(get_db)):
+    submissions = db.query(models.Submission).order_by(
+        models.Submission.timestamp.desc()
+    ).limit(100).all()
+
+    return [{
+        "id":             s.id,
+        "student_id":     s.student_id,
+        "language":       s.language,
+        "is_successful":  s.is_successful,
+        "execution_time": s.execution_time,
+        "output":         s.output,
+        "error":          s.error,
+        "ai_score":       s.ai_score,
+        "timestamp":      str(s.timestamp),
+    } for s in submissions]
+# ══════════════════════════════════════════════════════════════
 # ADMIN ROUTES
 # ══════════════════════════════════════════════════════════════
 
 @app.get("/admin/dashboard")
 def dashboard(db: Session = Depends(get_db)):
-    total_students  = db.query(models.User).filter(
-        models.User.role == "student"
-    ).count()
-    connected_now   = db.query(models.StudentSession).filter(
-        models.StudentSession.is_connected == True
-    ).count()
+    total_students  = db.query(models.User).filter(models.User.role == "student").count()
+    connected_now   = db.query(models.StudentSession).filter(models.StudentSession.is_connected == True).count()
     total_events    = db.query(models.StudentEvent).count()
     total_snapshots = db.query(models.CodeSnapshot).count()
-    suspicious      = db.query(models.StudentSession).filter(
-        models.StudentSession.suspicious_score >= 50
-    ).count()
+    suspicious      = db.query(models.StudentSession).filter(models.StudentSession.suspicious_score >= 50).count()
 
     return {
         "total_students":      total_students,
@@ -620,11 +863,9 @@ def dashboard(db: Session = Depends(get_db)):
 
 @app.get("/admin/all-students")
 def get_all_students(db: Session = Depends(get_db)):
-    students = db.query(models.User).filter(
-        models.User.role == "student"
-    ).all()
+    students = db.query(models.User).filter(models.User.role == "student").all()
+    result   = []
 
-    result = []
     for student in students:
         session = db.query(models.StudentSession).filter(
             models.StudentSession.student_id == student.student_id
@@ -637,7 +878,7 @@ def get_all_students(db: Session = Depends(get_db)):
 
         if session:
             suspicious_score = session.suspicious_score or 0
-            connected_at     = str(session.connected_at) if session.connected_at else None
+            connected_at     = str(session.connected_at)   if session.connected_at   else None
             last_heartbeat   = str(session.last_heartbeat) if session.last_heartbeat else None
 
             if session.is_connected and session.last_heartbeat:
@@ -706,6 +947,69 @@ def get_code(student_id: str, db: Session = Depends(get_db)):
     } for s in snapshots]
 
 
+@app.get("/admin/export-dataset")
+def export_dataset(
+    db:           Session = Depends(get_db),
+    current_user = Depends(auth.get_admin_user)
+):
+    from fastapi.responses import StreamingResponse
+    from .ml.feature_extractor import FEATURE_COLUMNS as CODE_FEATURE_COLUMNS
+    import csv, io
+
+    submissions = db.query(models.Submission).order_by(models.Submission.id).all()
+
+    header = (
+        ["submission_id", "student_id", "language", "is_successful", "execution_time",
+         "ai_prediction", "ai_confidence", "ai_probability",
+         "model_score_lr", "model_score_rf", "model_score_xgb", "model_score_fusion"]
+        + [f"code_{c}" for c in CODE_FEATURE_COLUMNS]
+        + [f"behav_{c}" for c in models.BEHAVIORAL_FEATURE_COLUMNS]
+        + ["teacher_label", "timestamp"]
+    )
+
+    buf    = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(header)
+
+    for s in submissions:
+        behavioral_row = (
+            db.query(models.BehavioralData).filter(
+                models.BehavioralData.id == s.behavioral_data_id
+            ).first()
+            if s.behavioral_data_id else None
+        )
+        latest_feedback = (
+            db.query(models.TeacherFeedback)
+            .filter(models.TeacherFeedback.submission_id == s.id)
+            .order_by(models.TeacherFeedback.created_at.desc())
+            .first()
+        )
+
+        model_scores  = s.model_scores or {}
+        code_features = s.code_features or {}
+
+        row = [
+            s.id, s.student_id, s.language, s.is_successful, s.execution_time,
+            s.ai_prediction, s.ai_confidence, s.ai_probability,
+            model_scores.get("logistic_regression"), model_scores.get("random_forest"),
+            model_scores.get("xgboost"), model_scores.get("fusion_ann"),
+        ]
+        row += [code_features.get(c) for c in CODE_FEATURE_COLUMNS]
+        row += [
+            getattr(behavioral_row, c) if behavioral_row else None
+            for c in models.BEHAVIORAL_FEATURE_COLUMNS
+        ]
+        row += [latest_feedback.teacher_label if latest_feedback else None, str(s.timestamp)]
+        writer.writerow(row)
+
+    filename = f"dataset_export_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.csv"
+    return StreamingResponse(
+        iter([buf.getvalue()]),
+        media_type = "text/csv",
+        headers    = {"Content-Disposition": f"attachment; filename={filename}"}
+    )
+
+
 @app.get("/admin/flagged")
 def get_flagged(db: Session = Depends(get_db)):
     flagged = db.query(models.StudentSession).filter(
@@ -725,6 +1029,10 @@ def get_flagged(db: Session = Depends(get_db)):
         })
     return result
 
+
+# ══════════════════════════════════════════════════════════════
+# HOME
+# ══════════════════════════════════════════════════════════════
 
 @app.get("/")
 def home():

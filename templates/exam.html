@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Exam — Screening Platform</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  #code_editor {
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 14px;
+    line-height: 1.6;
+    resize: vertical;
+    tab-size: 4;
+  }
+  .output-box {
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 13px;
+  }
+</style>
+</head>
+<body class="bg-gray-950 min-h-screen">
+
+<!-- Header -->
+<div class="bg-gray-900 border-b border-gray-800 px-6 py-4">
+  <div class="max-w-6xl mx-auto flex justify-between items-center">
+    <div>
+      <h1 class="text-white font-bold text-xl">💻 Exam Portal</h1>
+      <p class="text-gray-500 text-xs">Automated Technical Screening Platform</p>
+    </div>
+    <div class="flex items-center gap-4">
+      <div id="monitor_status"
+        class="px-3 py-1 rounded-full text-xs font-medium
+               bg-red-900 text-red-300">
+        🔴 Extension Not Connected
+      </div>
+      <span id="student_name" class="text-white text-sm font-medium"></span>
+      <button onclick="goBack()"
+        class="bg-gray-700 hover:bg-gray-600 text-white
+               px-4 py-2 rounded-lg text-sm transition">
+        ← Dashboard
+      </button>
+    </div>
+  </div>
+</div>
+
+<div class="max-w-6xl mx-auto p-5">
+  <div class="grid grid-cols-2 gap-5">
+
+    <!-- LEFT: Problem + Code Editor -->
+    <div class="space-y-4">
+
+      <!-- Problem Statement -->
+      <div class="bg-gray-900 rounded-xl border border-gray-800 p-5">
+        <div class="flex justify-between items-center mb-3">
+          <h2 class="text-white font-semibold text-lg">📋 Problem</h2>
+          <span id="problem_difficulty"
+            class="px-2 py-1 rounded-full text-xs font-medium
+                   bg-green-900 text-green-300">
+            Easy
+          </span>
+        </div>
+        <div id="problem_statement" class="text-gray-300 text-sm leading-relaxed">
+          <p class="font-semibold text-white mb-2">
+            Sum of Two Numbers
+          </p>
+          <p class="mb-3">
+            Write a program that reads two integers and prints their sum.
+          </p>
+          <div class="bg-gray-800 rounded-lg p-3 mb-3">
+            <p class="text-gray-400 text-xs mb-1">Input:</p>
+            <p class="text-green-400 font-mono text-sm">3 5</p>
+          </div>
+          <div class="bg-gray-800 rounded-lg p-3">
+            <p class="text-gray-400 text-xs mb-1">Expected Output:</p>
+            <p class="text-green-400 font-mono text-sm">8</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Language Selector -->
+      <div class="bg-gray-900 rounded-xl border border-gray-800 p-4">
+        <label class="text-gray-400 text-sm font-medium block mb-2">
+          Language
+        </label>
+        <select id="language_select"
+          onchange="changeLanguage()"
+          class="w-full bg-gray-800 text-white border border-gray-700
+                 rounded-lg px-4 py-2 focus:outline-none focus:border-blue-500">
+          <option value="python">🐍 Python</option>
+          <option value="c">⚙️ C</option>
+          <option value="cpp">⚙️ C++</option>
+          <option value="javascript">🟨 JavaScript</option>
+          <option value="java">☕ Java</option>
+        </select>
+      </div>
+
+      <!-- Code Editor -->
+      <div class="bg-gray-900 rounded-xl border border-gray-800">
+        <div class="p-3 border-b border-gray-800 flex justify-between items-center">
+          <h3 class="text-white font-medium text-sm">📝 Your Code</h3>
+          <div class="flex gap-2">
+            <button onclick="clearCode()"
+              class="text-gray-500 hover:text-gray-300 text-xs px-2 py-1
+                     rounded border border-gray-700 transition">
+              Clear
+            </button>
+            <button onclick="loadTemplate()"
+              class="text-blue-400 hover:text-blue-300 text-xs px-2 py-1
+                     rounded border border-blue-800 transition">
+              Load Template
+            </button>
+          </div>
+        </div>
+        <textarea
+          id="code_editor"
+          class="w-full bg-gray-950 text-green-400 p-4 rounded-b-xl
+                 focus:outline-none min-h-64"
+          rows="20"
+          placeholder="Write your code here..."
+          spellcheck="false"
+          onkeydown="handleTab(event)"
+        ></textarea>
+      </div>
+
+      <!-- Buttons -->
+      <div class="flex gap-3">
+        <button onclick="runCode()"
+          id="run_btn"
+          class="flex-1 bg-blue-600 hover:bg-blue-700 text-white
+                 font-semibold py-3 rounded-xl transition flex items-center
+                 justify-center gap-2">
+          ▶ Run Code
+        </button>
+        <button onclick="submitCode()"
+          id="submit_btn"
+          class="flex-1 bg-green-600 hover:bg-green-700 text-white
+                 font-semibold py-3 rounded-xl transition flex items-center
+                 justify-center gap-2">
+          ✅ Submit
+        </button>
+      </div>
+
+    </div>
+
+    <!-- RIGHT: Output + Submissions -->
+    <div class="space-y-4">
+
+      <!-- Output Panel -->
+      <div class="bg-gray-900 rounded-xl border border-gray-800">
+        <div class="p-4 border-b border-gray-800 flex justify-between items-center">
+          <h3 class="text-white font-semibold">⚡ Output</h3>
+          <div id="exec_time" class="text-gray-500 text-xs"></div>
+        </div>
+
+        <!-- Status -->
+        <div id="output_status" class="hidden p-3 border-b border-gray-800">
+        </div>
+
+        <!-- Output Text -->
+        <div class="p-4">
+          <div id="output_box"
+            class="output-box bg-gray-950 rounded-lg p-4 min-h-32
+                   text-gray-300 text-sm whitespace-pre-wrap overflow-auto
+                   max-h-64">
+            <span class="text-gray-600">
+              Output will appear here after running your code...
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <!-- My Submissions -->
+      <div class="bg-gray-900 rounded-xl border border-gray-800">
+        <div class="p-4 border-b border-gray-800 flex justify-between items-center">
+          <h3 class="text-white font-semibold">📊 My Submissions</h3>
+          <button onclick="loadSubmissions()"
+            class="text-blue-400 text-xs hover:underline">
+            Refresh
+          </button>
+        </div>
+        <div id="submissions_list"
+          class="p-4 space-y-2 max-h-80 overflow-y-auto">
+          <p class="text-gray-600 text-sm text-center">
+            No submissions yet
+          </p>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<script>
+const API       = 'http://localhost:8000';
+const token     = localStorage.getItem('token');
+const studentId = localStorage.getItem('student_id');
+const fullName  = localStorage.getItem('full_name');
+
+if (!token) window.location.href = 'login.html';
+
+document.getElementById('student_name').textContent = fullName || '';
+
+// ── CODE TEMPLATES ─────────────────────────────────────────────
+const TEMPLATES = {
+  python: `# Python Solution
+a, b = map(int, input().split())
+print(a + b)`,
+
+  c: `#include <stdio.h>
+
+int main() {
+    int a, b;
+    scanf("%d %d", &a, &b);
+    printf("%d\\n", a + b);
+    return 0;
+}`,
+
+  cpp: `#include <iostream>
+using namespace std;
+
+int main() {
+    int a, b;
+    cin >> a >> b;
+    cout << a + b << endl;
+    return 0;
+}`,
+
+  javascript: `// JavaScript Solution
+const lines = require('fs').readFileSync('/dev/stdin','utf8').trim().split('\\n');
+const [a, b] = lines[0].split(' ').map(Number);
+console.log(a + b);`,
+
+  java: `import java.util.Scanner;
+
+public class Solution {
+    public static void main(String[] args) {
+        Scanner sc = new Scanner(System.in);
+        int a = sc.nextInt();
+        int b = sc.nextInt();
+        System.out.println(a + b);
+    }
+}`,
+};
+
+// Test input for this problem (matches "Input: 3 5" shown above)
+const TEST_STDIN = '3 5';
+
+// Load template
+function loadTemplate() {
+  const lang = document.getElementById('language_select').value;
+  document.getElementById('code_editor').value = TEMPLATES[lang] || '';
+}
+
+// Change language
+function changeLanguage() {
+  document.getElementById('code_editor').value = '';
+  clearOutput();
+}
+
+// Tab key in editor
+function handleTab(e) {
+  if (e.key === 'Tab') {
+    e.preventDefault();
+    const ta    = document.getElementById('code_editor');
+    const start = ta.selectionStart;
+    const end   = ta.selectionEnd;
+    ta.value    = ta.value.substring(0, start) + '    ' + ta.value.substring(end);
+    ta.selectionStart = ta.selectionEnd = start + 4;
+  }
+}
+
+function clearCode() {
+  document.getElementById('code_editor').value = '';
+  clearOutput();
+}
+
+function clearOutput() {
+  document.getElementById('output_box').innerHTML =
+    '<span class="text-gray-600">Output will appear here after running your code...</span>';
+  document.getElementById('output_status').classList.add('hidden');
+  document.getElementById('exec_time').textContent = '';
+}
+
+// ── RUN CODE ───────────────────────────────────────────────────
+async function runCode() {
+  const code     = document.getElementById('code_editor').value.trim();
+  const language = document.getElementById('language_select').value;
+  const runBtn   = document.getElementById('run_btn');
+
+  if (!code) {
+    alert('Please write some code first!');
+    return;
+  }
+
+  // Show loading
+  runBtn.textContent = '⏳ Running...';
+  runBtn.disabled    = true;
+  document.getElementById('output_box').innerHTML =
+    '<span class="text-blue-400 animate-pulse">Running your code in Docker...</span>';
+  document.getElementById('output_status').classList.add('hidden');
+
+  try {
+    const res  = await fetch(`${API}/code/execute`, {
+      method:  'POST',
+      headers: {
+        'Content-Type':  'application/json',
+        'Authorization': `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        student_id: studentId,
+        language:   language,
+        code:       code,
+        stdin:      TEST_STDIN,
+        timestamp:  new Date().toISOString(),
+      })
+    });
+
+    const data = await res.json();
+    showOutput(data);
+    loadSubmissions();
+
+  } catch (err) {
+    document.getElementById('output_box').innerHTML =
+      '<span class="text-red-400">❌ Cannot connect to server. Make sure backend is running!</span>';
+  } finally {
+    runBtn.textContent = '▶ Run Code';
+    runBtn.disabled    = false;
+  }
+}
+
+// ── SUBMIT CODE ────────────────────────────────────────────────
+async function submitCode() {
+  const code      = document.getElementById('code_editor').value.trim();
+  const language  = document.getElementById('language_select').value;
+  const submitBtn = document.getElementById('submit_btn');
+
+  if (!code) {
+    alert('Please write some code first!');
+    return;
+  }
+
+  const confirm_submit = confirm(
+    'Are you sure you want to submit your solution?'
+  );
+  if (!confirm_submit) return;
+
+  submitBtn.textContent = '⏳ Submitting...';
+  submitBtn.disabled    = true;
+
+  try {
+    const res  = await fetch(`${API}/code/execute`, {
+      method:  'POST',
+      headers: {
+        'Content-Type':  'application/json',
+        'Authorization': `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        student_id: studentId,
+        language:   language,
+        code:       code,
+        stdin:      TEST_STDIN,
+        timestamp:  new Date().toISOString(),
+      })
+    });
+
+    const data = await res.json();
+    showOutput(data);
+    loadSubmissions();
+
+    if (data.success) {
+      alert('✅ Solution submitted successfully!');
+    }
+
+  } catch (err) {
+    alert('❌ Cannot connect to server!');
+  } finally {
+    submitBtn.textContent = '✅ Submit';
+    submitBtn.disabled    = false;
+  }
+}
+
+// ── SHOW OUTPUT ────────────────────────────────────────────────
+function showOutput(data) {
+  const outputBox    = document.getElementById('output_box');
+  const statusDiv    = document.getElementById('output_status');
+  const execTimeDiv  = document.getElementById('exec_time');
+
+  execTimeDiv.textContent = `⏱️ ${data.execution_time}s`;
+
+  if (data.success) {
+    statusDiv.className =
+      'p-3 border-b border-gray-800 bg-green-950 border-green-800';
+    statusDiv.innerHTML =
+      '<span class="text-green-400 font-medium text-sm">✅ Code executed successfully!</span>';
+    statusDiv.classList.remove('hidden');
+
+    outputBox.innerHTML = data.output
+      ? `<span class="text-green-400">${escapeHtml(data.output)}</span>`
+      : '<span class="text-gray-500">(No output)</span>';
+  } else {
+    statusDiv.className =
+      'p-3 border-b border-gray-800 bg-red-950 border-red-800';
+    statusDiv.innerHTML =
+      '<span class="text-red-400 font-medium text-sm">❌ Error in your code</span>';
+    statusDiv.classList.remove('hidden');
+
+    outputBox.innerHTML = data.error
+      ? `<span class="text-red-400">${escapeHtml(data.error)}</span>`
+      : '<span class="text-gray-500">(No error message)</span>';
+  }
+}
+
+// ── LOAD SUBMISSIONS ───────────────────────────────────────────
+async function loadSubmissions() {
+  try {
+    const res  = await fetch(`${API}/admin/submissions`);
+    const all  = await res.json();
+
+    // Filter for this student
+    const mine = all.filter(s => s.student_id === studentId);
+    const list = document.getElementById('submissions_list');
+
+    if (mine.length === 0) {
+      list.innerHTML =
+        '<p class="text-gray-600 text-sm text-center">No submissions yet</p>';
+      return;
+    }
+
+    list.innerHTML = mine.map(s => `
+      <div class="flex items-center justify-between p-3 rounded-lg
+                  ${s.is_successful ? 'bg-green-950 border border-green-800'
+                                    : 'bg-red-950 border border-red-800'}">
+        <div>
+          <span class="text-sm font-medium
+            ${s.is_successful ? 'text-green-400' : 'text-red-400'}">
+            ${s.is_successful ? '✅' : '❌'} ${s.language.toUpperCase()}
+          </span>
+          <p class="text-gray-500 text-xs mt-0.5">
+            ${new Date(s.timestamp).toLocaleString()}
+          </p>
+        </div>
+        <span class="text-gray-400 text-xs">⏱️ ${s.execution_time}s</span>
+      </div>
+    `).join('');
+
+  } catch (err) {
+    console.error('Failed to load submissions:', err);
+  }
+}
+
+// ── CHECK EXTENSION STATUS ─────────────────────────────────────
+async function checkExtension() {
+  try {
+    const res  = await fetch(
+      `${API}/student/my-status?student_id=${studentId}`
+    );
+    const data = await res.json();
+    const el   = document.getElementById('monitor_status');
+
+    if (data.is_connected) {
+      el.textContent = '🟢 Extension Connected';
+      el.className   =
+        'px-3 py-1 rounded-full text-xs font-medium bg-green-900 text-green-300';
+    } else {
+      el.textContent = '🔴 Extension Not Connected';
+      el.className   =
+        'px-3 py-1 rounded-full text-xs font-medium bg-red-900 text-red-300';
+    }
+  } catch {}
+}
+
+function escapeHtml(text) {
+  return text
+    .replace(/&/g,  '&amp;')
+    .replace(/</g,  '&lt;')
+    .replace(/>/g,  '&gt;')
+    .replace(/"/g,  '&quot;');
+}
+
+function goBack() {
+  window.location.href = 'dashboard.html';
+}
+
+// ── INIT ───────────────────────────────────────────────────────
+loadTemplate();
+loadSubmissions();
+checkExtension();
+setInterval(checkExtension, 10000);
+</script>
+</body>
+</html>
