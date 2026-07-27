@@ -2,11 +2,11 @@ const vscode = require('vscode');
 const http   = require('http');
 
 // ══════════════════════════════════════════════════════════════
-// CODE MONITOR v3.0 — AUTOMATED TECHNICAL SCREENING PLATFORM
+// CODE MONITOR v4.0 — AUTOMATED TECHNICAL SCREENING PLATFORM
 // ══════════════════════════════════════════════════════════════
 
 const CONFIG = {
-    SERVER_HOST:               'localhost',
+    SERVER_HOST:               '127.0.0.1',
     SERVER_PORT:               8000,
     SNAPSHOT_INTERVAL_MS:      30000,   // Send code every 30 seconds
     HEARTBEAT_INTERVAL_MS:     10000,   // Heartbeat every 10 seconds
@@ -17,9 +17,23 @@ const CONFIG = {
     AI_WATCHING_SPEED:         8,       // chars/sec = fast typing
     BURST_WINDOW_MS:           3000,    // 3 second window
     LONG_ABSENCE_THRESHOLD_MS: 30000,   // 30 seconds away = suspicious
+
+    // ── New feature thresholds ──────────────────────────────────
+    PAUSE_THRESHOLD_MS:        3000,    // gap between keystrokes = a "pause"
+    FREEZE_CHECK_INTERVAL_MS:  5000,    // how often to check for screen freeze
+    FREEZE_THRESHOLD_MS:       20000,   // focused + silent this long = freeze
+    CODE_JUMP_LINE_THRESHOLD:  50,      // cursor moving >50 lines instantly
+    LARGE_DELETION_THRESHOLD:  30,      // chars removed at once
+    KPM_SAMPLE_INTERVAL_MS:    15000,   // how often to sample keys/min
+    KEYSTROKE_HISTORY_LIMIT:   200,     // max intervals kept for stats
+    SESSION_BREAK_THRESHOLD_MS: 120000, // 2 min silent = a "session break"
+    SKILL_JUMP_SCORE_DELTA:    30,      // ai_score jump between snapshots
+    RENAME_MIN_EDITS:          2,       // simultaneous edits = rename op
 };
 
-// ── Global State ───────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════
+// GLOBAL STATE — original 16-feature state
+// ══════════════════════════════════════════════════════════════
 let studentId           = null;
 let jwtToken            = null;
 let isConnected         = false;
@@ -46,10 +60,39 @@ let sessionStats        = {
 };
 
 // ══════════════════════════════════════════════════════════════
+// GLOBAL STATE — 18 new behavioral-tracking features
+// ══════════════════════════════════════════════════════════════
+let backspaceCount        = 0;                 // Feature: Backspace Frequency
+let keystrokeIntervals    = [];                 // Feature: Keystroke Rhythm / Time Between Keystrokes
+let lastKeystrokeAt       = null;
+let kpmSamples            = [];                 // Feature: Keys Per Minute Over Time
+let kpmTimer              = null;
+let pauseEvents           = [];                 // Feature: Typing Pause Patterns
+let freezeTimer           = null;               // Feature: Screen Freeze Detection
+let lastActivityAt        = null;
+let lastCursorLine        = null;               // Feature: Sudden Code Jump
+let codeJumpCount         = 0;
+let deletionEvents        = [];                 // Feature: Code Deletion Pattern
+let undoCount             = 0;                  // Feature: Undo/Redo Frequency
+let redoCount             = 0;
+let copyFromSameFileCount = 0;                  // Feature: Copy From Same File
+let renameEventCount      = 0;                  // Feature: Variable Rename Detection
+let skillJumpEvents       = [];                 // Feature: Sudden Skill Jump
+let previousSnapshotScore = null;
+let lineAddTimestamps     = [];                 // Feature: Time Per Line Ratio
+let lastLineCount         = 0;
+let sessionBreaks         = [];                 // Feature: Session Break Pattern
+let scrollEvents          = [];                 // Feature: Scroll Behavior
+let lastVisibleRangeLine  = null;
+let speedComplexitySamples = [];                // Feature: Typing Speed vs Complexity
+let lastCodeFingerprint   = null;               // Feature: Same Code As Classmate
+let lastAIDetectionResult = null;
+
+// ══════════════════════════════════════════════════════════════
 // ACTIVATE
 // ══════════════════════════════════════════════════════════════
 function activate(context) {
-    console.log('Code Monitor v3.0 Active!');
+    console.log('Code Monitor v4.0 Active!');
 
     // Create status bar
     statusBarItem = vscode.window.createStatusBarItem(
@@ -126,6 +169,7 @@ function activate(context) {
                 suspiciousEvents: [],
                 sessionStart:     new Date().toISOString(),
             };
+            resetBehavioralState();
 
             updateStatusBar('connected');
 
@@ -204,8 +248,32 @@ function activate(context) {
     );
 
     // ══════════════════════════════════════════════════════════
+    // COMMAND: ANALYZE CODE — manual AI-detection trigger
+    // ══════════════════════════════════════════════════════════
+    let analyzeCommand = vscode.commands.registerCommand(
+        'code-monitor.analyzeCode',
+        async () => {
+            if (!isConnected) {
+                vscode.window.showWarningMessage(
+                    '❌ Not connected. Use: Code Monitor: Login to Exam'
+                );
+                return;
+            }
+            const editor = vscode.window.activeTextEditor;
+            if (!editor) {
+                vscode.window.showWarningMessage('No active editor to analyze.');
+                return;
+            }
+            vscode.window.showInformationMessage('🔎 Analyzing code for AI usage...');
+            await runAIDetection(editor, 'MANUAL_COMMAND');
+        }
+    );
+
+    // ══════════════════════════════════════════════════════════
     // LISTENER: Text Changes
-    // Detects: paste, AI-watching (fast typing)
+    // Detects: paste, AI-watching (fast typing), backspace frequency,
+    // keystroke rhythm, typing pauses, deletion patterns, undo/redo,
+    // copy-from-same-file, variable rename, sudden skill jump inputs
     // ══════════════════════════════════════════════════════════
     let textChangeListener = vscode.workspace.onDidChangeTextDocument(
         (event) => {
@@ -216,15 +284,27 @@ function activate(context) {
             if (scheme !== 'file' && scheme !== 'untitled') return;
 
             const now = Date.now();
+            lastActivityAt = now;
 
             // ── Aggregate ALL changes in this event ────────────
             // VS Code sometimes splits a paste into multiple small
             // contentChanges so we sum them ALL up
             let totalCharsInEvent = 0;
+            let totalCharsDeleted = 0;
             let pastePreview      = '';
 
             for (const change of event.contentChanges) {
                 const len = change.text.length;
+
+                // ── Backspace / deletion tracking ───────────────
+                if (change.rangeLength > 0 && len === 0) {
+                    backspaceCount++;
+                    totalCharsDeleted += change.rangeLength;
+                } else if (change.rangeLength > 0 && len < change.rangeLength) {
+                    // A replace that nets a deletion (e.g. select+type)
+                    totalCharsDeleted += (change.rangeLength - len);
+                }
+
                 if (len === 0) continue;
 
                 totalCharsInEvent += len;
@@ -233,6 +313,70 @@ function activate(context) {
 
                 if (pastePreview.length < 120) {
                     pastePreview += change.text;
+                }
+            }
+
+            // ── Keystroke Rhythm / Time Between Keystrokes ──────
+            if (lastKeystrokeAt !== null && totalCharsInEvent > 0) {
+                const interval = now - lastKeystrokeAt;
+                keystrokeIntervals.push(interval);
+                if (keystrokeIntervals.length > CONFIG.KEYSTROKE_HISTORY_LIMIT) {
+                    keystrokeIntervals.shift();
+                }
+
+                // ── Typing Pause Patterns ───────────────────────
+                if (interval >= CONFIG.PAUSE_THRESHOLD_MS) {
+                    pauseEvents.push({ duration: interval, timestamp: now });
+                    if (pauseEvents.length > 100) pauseEvents.shift();
+                }
+            }
+            if (totalCharsInEvent > 0) lastKeystrokeAt = now;
+
+            // ── Code Deletion Pattern ───────────────────────────
+            if (totalCharsDeleted >= CONFIG.LARGE_DELETION_THRESHOLD) {
+                deletionEvents.push({ chars: totalCharsDeleted, timestamp: now });
+                if (deletionEvents.length > 100) deletionEvents.shift();
+
+                sendToServer('/student/event', {
+                    student_id: studentId,
+                    event_type: 'LARGE_DELETION',
+                    severity:   'MEDIUM',
+                    details: {
+                        chars_deleted: totalCharsDeleted,
+                        message:       'Large block of code deleted',
+                    },
+                    timestamp: new Date().toISOString(),
+                });
+            }
+
+            // ── Undo / Redo Frequency ───────────────────────────
+            if (event.reason === vscode.TextDocumentChangeReason.Undo) {
+                undoCount++;
+            } else if (event.reason === vscode.TextDocumentChangeReason.Redo) {
+                redoCount++;
+            }
+
+            // ── Variable Rename Detection ───────────────────────
+            // VS Code's "Rename Symbol" (F2) applies several
+            // simultaneous edits with identical replacement text
+            // inside a single change event.
+            if (event.contentChanges.length >= CONFIG.RENAME_MIN_EDITS) {
+                const texts = event.contentChanges
+                    .map(c => c.text)
+                    .filter(t => /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(t));
+                if (texts.length >= CONFIG.RENAME_MIN_EDITS &&
+                    texts.every(t => t === texts[0])) {
+                    renameEventCount++;
+                    sendToServer('/student/event', {
+                        student_id: studentId,
+                        event_type: 'VARIABLE_RENAME_DETECTED',
+                        severity:   'INFO',
+                        details: {
+                            new_name:    texts[0],
+                            occurrences: texts.length,
+                        },
+                        timestamp: new Date().toISOString(),
+                    });
                 }
             }
 
@@ -257,15 +401,29 @@ function activate(context) {
 
                 addSuspiciousScore(15, 'Paste detected');
 
+                // ── Copy From Same File ─────────────────────────
+                // If the pasted text already appears elsewhere in the
+                // current document, it was likely copied internally
+                // rather than pulled from an external source.
+                const fullText = event.document.getText();
+                const occurrences = pastePreview.trim().length > 5
+                    ? countOccurrences(fullText, pastePreview.trim())
+                    : 0;
+                const isCopyFromSameFile = occurrences > 1;
+                if (isCopyFromSameFile) {
+                    copyFromSameFileCount++;
+                }
+
                 sendToServer('/student/event', {
                     student_id: studentId,
                     event_type: 'PASTE_DETECTED',
                     severity:   'HIGH',
                     details: {
-                        chars_pasted:     totalCharsInEvent,
-                        paste_preview:    preview,
-                        total_pastes:     sessionStats.totalPastes,
-                        suspicious_score: suspiciousScore,
+                        chars_pasted:         totalCharsInEvent,
+                        paste_preview:        preview,
+                        total_pastes:         sessionStats.totalPastes,
+                        suspicious_score:     suspiciousScore,
+                        copy_from_same_file:  isCopyFromSameFile,
                     },
                     timestamp: new Date().toISOString(),
                 });
@@ -296,13 +454,81 @@ function activate(context) {
                 });
             }
 
+            // ── Typing Speed vs Complexity ──────────────────────
+            const complexity = estimateComplexity(event.document.getText());
+            speedComplexitySamples.push({ speed, complexity, timestamp: now });
+            if (speedComplexitySamples.length > 100) speedComplexitySamples.shift();
+
+            // ── Time Per Line Ratio ─────────────────────────────
+            const currentLineCount = event.document.lineCount;
+            if (currentLineCount !== lastLineCount) {
+                lineAddTimestamps.push({ lines: currentLineCount, timestamp: now });
+                if (lineAddTimestamps.length > 200) lineAddTimestamps.shift();
+                lastLineCount = currentLineCount;
+            }
+
             resetIdleTimer();
         }
     );
 
     // ══════════════════════════════════════════════════════════
+    // LISTENER: Cursor / Selection changes
+    // Detects: Sudden Code Jump
+    // ══════════════════════════════════════════════════════════
+    let selectionChangeListener = vscode.window.onDidChangeTextEditorSelection(
+        (event) => {
+            if (!isConnected) return;
+            const now = Date.now();
+            lastActivityAt = now;
+
+            const line = event.selections[0]?.active.line;
+            if (line === undefined) return;
+
+            if (lastCursorLine !== null) {
+                const jump = Math.abs(line - lastCursorLine);
+                if (jump >= CONFIG.CODE_JUMP_LINE_THRESHOLD) {
+                    codeJumpCount++;
+                    sendToServer('/student/event', {
+                        student_id: studentId,
+                        event_type: 'SUDDEN_CODE_JUMP',
+                        severity:   'LOW',
+                        details: {
+                            from_line: lastCursorLine,
+                            to_line:   line,
+                            lines_jumped: jump,
+                        },
+                        timestamp: new Date().toISOString(),
+                    });
+                }
+            }
+            lastCursorLine = line;
+        }
+    );
+
+    // ══════════════════════════════════════════════════════════
+    // LISTENER: Scroll Behavior
+    // ══════════════════════════════════════════════════════════
+    let scrollListener = vscode.window.onDidChangeTextEditorVisibleRanges(
+        (event) => {
+            if (!isConnected) return;
+            const now = Date.now();
+            const topLine = event.visibleRanges[0]?.start.line;
+            if (topLine === undefined) return;
+
+            if (lastVisibleRangeLine !== null) {
+                scrollEvents.push({
+                    delta: topLine - lastVisibleRangeLine,
+                    timestamp: now,
+                });
+                if (scrollEvents.length > 200) scrollEvents.shift();
+            }
+            lastVisibleRangeLine = topLine;
+        }
+    );
+
+    // ══════════════════════════════════════════════════════════
     // LISTENER: Window Focus
-    // Detects: tab switch, rapid switching, long absence
+    // Detects: tab switch, rapid switching, long absence, session breaks
     // ══════════════════════════════════════════════════════════
     let windowFocusListener = vscode.window.onDidChangeWindowState(
         (windowState) => {
@@ -388,6 +614,12 @@ function activate(context) {
                     });
                 }
 
+                // ── Session Break Pattern ───────────────────────
+                if (awayMs >= CONFIG.SESSION_BREAK_THRESHOLD_MS) {
+                    sessionBreaks.push({ duration_ms: awayMs, timestamp: now });
+                    if (sessionBreaks.length > 50) sessionBreaks.shift();
+                }
+
                 updateStatusBar('connected');
                 windowBlurTime = null;
             }
@@ -400,6 +632,10 @@ function activate(context) {
     let editorChangeListener = vscode.window.onDidChangeActiveTextEditor(
         (editor) => {
             if (!isConnected || !editor) return;
+
+            lastCursorLine       = null;
+            lastVisibleRangeLine = null;
+            lastLineCount        = editor.document.lineCount;
 
             sendToServer('/student/event', {
                 student_id: studentId,
@@ -419,7 +655,10 @@ function activate(context) {
         loginCommand,
         logoutCommand,
         statusCommand,
+        analyzeCommand,
         textChangeListener,
+        selectionChangeListener,
+        scrollListener,
         windowFocusListener,
         editorChangeListener,
     );
@@ -431,14 +670,44 @@ function activate(context) {
 function startMonitoring() {
     snapshotTimer  = setInterval(sendCodeSnapshot, CONFIG.SNAPSHOT_INTERVAL_MS);
     heartbeatTimer = setInterval(sendHeartbeat, CONFIG.HEARTBEAT_INTERVAL_MS);
+    kpmTimer       = setInterval(sampleKeysPerMinute, CONFIG.KPM_SAMPLE_INTERVAL_MS);
+    freezeTimer    = setInterval(checkScreenFreeze, CONFIG.FREEZE_CHECK_INTERVAL_MS);
     resetIdleTimer();
 }
 
 function stopMonitoring() {
     clearInterval(snapshotTimer);
     clearInterval(heartbeatTimer);
+    clearInterval(kpmTimer);
+    clearInterval(freezeTimer);
     clearTimeout(idleTimer);
-    snapshotTimer = heartbeatTimer = idleTimer = null;
+    snapshotTimer = heartbeatTimer = kpmTimer = freezeTimer = idleTimer = null;
+}
+
+function resetBehavioralState() {
+    backspaceCount          = 0;
+    keystrokeIntervals      = [];
+    lastKeystrokeAt         = null;
+    kpmSamples              = [];
+    pauseEvents             = [];
+    lastActivityAt          = Date.now();
+    lastCursorLine          = null;
+    codeJumpCount           = 0;
+    deletionEvents          = [];
+    undoCount               = 0;
+    redoCount               = 0;
+    copyFromSameFileCount   = 0;
+    renameEventCount        = 0;
+    skillJumpEvents         = [];
+    previousSnapshotScore   = null;
+    lineAddTimestamps       = [];
+    lastLineCount           = 0;
+    sessionBreaks           = [];
+    scrollEvents            = [];
+    lastVisibleRangeLine    = null;
+    speedComplexitySamples  = [];
+    lastCodeFingerprint     = null;
+    lastAIDetectionResult   = null;
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -514,16 +783,40 @@ function callLoginAPI(sid, password) {
 
 // ══════════════════════════════════════════════════════════════
 // SEND CODE SNAPSHOT — every 30 seconds
+// This counts as a "code submission", so it also triggers AI detection.
 // ══════════════════════════════════════════════════════════════
 function sendCodeSnapshot() {
     const editor = vscode.window.activeTextEditor;
     if (!editor) return;
 
-    const code     = editor.document.getText();
+    const code = editor.document.getText();
     if (!code || code.trim().length === 0) return;
 
     const analysis = analyzeCodeForAIPatterns(code);
     sessionStats.codeSnapshots++;
+
+    // ── Sudden Skill Jump ────────────────────────────────────
+    if (previousSnapshotScore !== null) {
+        const delta = analysis.ai_score - previousSnapshotScore;
+        if (Math.abs(delta) >= CONFIG.SKILL_JUMP_SCORE_DELTA) {
+            skillJumpEvents.push({ delta, timestamp: Date.now() });
+            if (skillJumpEvents.length > 50) skillJumpEvents.shift();
+
+            sendToServer('/student/event', {
+                student_id: studentId,
+                event_type: 'SUDDEN_SKILL_JUMP',
+                severity:   'MEDIUM',
+                details: {
+                    previous_score: previousSnapshotScore,
+                    current_score:  analysis.ai_score,
+                    delta:          delta,
+                    message:        'Sudden change in code sophistication between snapshots',
+                },
+                timestamp: new Date().toISOString(),
+            });
+        }
+    }
+    previousSnapshotScore = analysis.ai_score;
 
     sendToServer('/student/submit-code', {
         student_id:      studentId,
@@ -532,15 +825,19 @@ function sendCodeSnapshot() {
         code:            code,
         line_count:      code.split('\n').length,
         analysis:        analysis,
+        code_fingerprint: computeCodeFingerprint(code), // Same Code As Classmate (server-side match)
         snapshot_number: sessionStats.codeSnapshots,
         timestamp:       new Date().toISOString(),
     });
 
     console.log(`📸 Snapshot #${sessionStats.codeSnapshots} sent`);
+
+    // A periodic snapshot counts as a code submission — run AI detection.
+    runAIDetection(editor, 'AUTO_SNAPSHOT');
 }
 
 // ══════════════════════════════════════════════════════════════
-// AI CODE PATTERN ANALYSIS
+// AI CODE PATTERN ANALYSIS (static heuristics on the code text)
 // ══════════════════════════════════════════════════════════════
 function analyzeCodeForAIPatterns(code) {
     const lines = code.split('\n');
@@ -605,6 +902,273 @@ function analyzeCodeForAIPatterns(code) {
         ai_score:          aiScore,
         likely_ai_written: aiScore >= 40,
     };
+}
+
+// ══════════════════════════════════════════════════════════════
+// COMPLEXITY ESTIMATE — naive cyclomatic-style heuristic, used by
+// the "Typing Speed vs Complexity" feature
+// ══════════════════════════════════════════════════════════════
+function estimateComplexity(code) {
+    const branchPattern = /\b(if|else|for|while|case|catch|switch|&&|\|\|)\b/g;
+    return (code.match(branchPattern) || []).length;
+}
+
+// ══════════════════════════════════════════════════════════════
+// CODE FINGERPRINT — normalized hash used server-side for
+// "Same Code As Classmate" cross-student comparison
+// ══════════════════════════════════════════════════════════════
+function computeCodeFingerprint(code) {
+    const normalized = code
+        .replace(/\/\/.*$/gm, '')
+        .replace(/#.*$/gm, '')
+        .replace(/\s+/g, '')
+        .toLowerCase();
+
+    // djb2 string hash — good enough as a similarity fingerprint,
+    // the actual cross-student match is performed by the backend.
+    let hash = 5381;
+    for (let i = 0; i < normalized.length; i++) {
+        hash = ((hash << 5) + hash + normalized.charCodeAt(i)) >>> 0;
+    }
+    lastCodeFingerprint = hash.toString(16);
+    return lastCodeFingerprint;
+}
+
+function countOccurrences(haystack, needle) {
+    if (!needle) return 0;
+    let count = 0;
+    let pos   = 0;
+    while ((pos = haystack.indexOf(needle, pos)) !== -1) {
+        count++;
+        pos += needle.length;
+    }
+    return count;
+}
+
+// ══════════════════════════════════════════════════════════════
+// KEYS PER MINUTE — sampled periodically
+// ══════════════════════════════════════════════════════════════
+function sampleKeysPerMinute() {
+    if (!isConnected) return;
+    const now       = Date.now();
+    const windowMs  = CONFIG.KPM_SAMPLE_INTERVAL_MS;
+    const recent    = keystrokeTimestamps.filter(k => now - k.time < windowMs);
+    const charCount = recent.reduce((s, k) => s + k.length, 0);
+    const kpm       = Math.round(charCount / (windowMs / 60000));
+
+    kpmSamples.push({ kpm, timestamp: now });
+    if (kpmSamples.length > 100) kpmSamples.shift();
+}
+
+// ══════════════════════════════════════════════════════════════
+// SCREEN FREEZE DETECTION
+// Window is focused but there has been zero activity (keystrokes,
+// cursor movement, scrolling) for an unusually long time.
+// ══════════════════════════════════════════════════════════════
+function checkScreenFreeze() {
+    if (!isConnected || !isWindowFocused || isIdle) return;
+    if (lastActivityAt === null) return;
+
+    const silentMs = Date.now() - lastActivityAt;
+    if (silentMs >= CONFIG.FREEZE_THRESHOLD_MS) {
+        sendToServer('/student/event', {
+            student_id: studentId,
+            event_type: 'SCREEN_FREEZE_DETECTED',
+            severity:   'LOW',
+            details: {
+                silent_ms: silentMs,
+                message:   'Window focused but no editor activity detected',
+            },
+            timestamp: new Date().toISOString(),
+        });
+        // Avoid re-firing every check until real activity resumes
+        lastActivityAt = Date.now();
+    }
+}
+
+// ══════════════════════════════════════════════════════════════
+// BEHAVIORAL SIGNALS — aggregates all 34 tracked signals for the
+// AI-detection backend call
+// ══════════════════════════════════════════════════════════════
+function collectBehavioralSignals() {
+    const avgInterval = keystrokeIntervals.length
+        ? keystrokeIntervals.reduce((a, b) => a + b, 0) / keystrokeIntervals.length
+        : 0;
+    const intervalVariance = keystrokeIntervals.length > 1
+        ? keystrokeIntervals.reduce((s, v) => s + Math.pow(v - avgInterval, 2), 0) / keystrokeIntervals.length
+        : 0;
+    const intervalStdDev = Math.sqrt(intervalVariance);
+
+    const avgKpm = kpmSamples.length
+        ? kpmSamples.reduce((s, k) => s + k.kpm, 0) / kpmSamples.length
+        : 0;
+
+    const avgPause = pauseEvents.length
+        ? pauseEvents.reduce((s, p) => s + p.duration, 0) / pauseEvents.length
+        : 0;
+
+    const linesPerMs = lineAddTimestamps.length > 1
+        ? (lineAddTimestamps[lineAddTimestamps.length - 1].timestamp - lineAddTimestamps[0].timestamp) /
+          Math.max(1, lineAddTimestamps[lineAddTimestamps.length - 1].lines - lineAddTimestamps[0].lines)
+        : 0;
+
+    const avgSpeed = speedComplexitySamples.length
+        ? speedComplexitySamples.reduce((s, v) => s + v.speed, 0) / speedComplexitySamples.length
+        : 0;
+    const avgComplexity = speedComplexitySamples.length
+        ? speedComplexitySamples.reduce((s, v) => s + v.complexity, 0) / speedComplexitySamples.length
+        : 0;
+
+    return {
+        // ── Original signals ────────────────────────────────
+        total_keystrokes:        sessionStats.totalKeystrokes,
+        total_pastes:            sessionStats.totalPastes,
+        total_tab_switches:      sessionStats.totalTabSwitches,
+        total_idle_events:       sessionStats.totalIdleEvents,
+        code_snapshots:          sessionStats.codeSnapshots,
+        suspicious_score:        suspiciousScore,
+        is_window_focused:       isWindowFocused,
+        is_idle:                 isIdle,
+        session_duration_ms:     sessionStats.sessionStart
+            ? Date.now() - new Date(sessionStats.sessionStart).getTime() : 0,
+
+        // ── 18 new behavioral features ──────────────────────
+        backspace_frequency:        backspaceCount,
+        keystroke_rhythm_stddev_ms: Math.round(intervalStdDev),
+        avg_time_between_keys_ms:   Math.round(avgInterval),
+        keys_per_minute_avg:        Math.round(avgKpm),
+        keys_per_minute_series:     kpmSamples.slice(-20),
+        typing_pause_count:         pauseEvents.length,
+        typing_pause_avg_ms:        Math.round(avgPause),
+        screen_freeze_events:       lastActivityAt !== null
+            ? Math.max(0, Math.floor((Date.now() - lastActivityAt) / CONFIG.FREEZE_THRESHOLD_MS)) : 0,
+        sudden_code_jump_count:     codeJumpCount,
+        code_deletion_events:       deletionEvents.length,
+        code_deletion_chars_total:  deletionEvents.reduce((s, d) => s + d.chars, 0),
+        undo_count:                 undoCount,
+        redo_count:                 redoCount,
+        copy_from_same_file_count:  copyFromSameFileCount,
+        variable_rename_count:      renameEventCount,
+        sudden_skill_jump_count:    skillJumpEvents.length,
+        typing_speed_variance:      Math.round(intervalVariance),
+        time_per_line_ms:           Math.round(linesPerMs),
+        session_break_count:        sessionBreaks.length,
+        scroll_event_count:         scrollEvents.length,
+        typing_speed_avg_cps:       Number(avgSpeed.toFixed(2)),
+        code_complexity_avg:        Number(avgComplexity.toFixed(2)),
+        code_fingerprint:           lastCodeFingerprint,
+    };
+}
+
+// ══════════════════════════════════════════════════════════════
+// AI DETECTION — sends code + all behavioral signals to backend
+// ══════════════════════════════════════════════════════════════
+async function runAIDetection(editor, trigger) {
+    const code = editor.document.getText();
+    if (!code || code.trim().length === 0) return;
+
+    const signals = collectBehavioralSignals();
+
+    const result = await callAIDetectionAPI({
+        student_id: studentId,
+        code:       code,
+        filename:   editor.document.fileName,
+        language:   editor.document.languageId,
+        trigger:    trigger,
+        signals:    signals,
+        timestamp:  new Date().toISOString(),
+    });
+
+    if (!result.success) {
+        console.log(`AI detection call failed: ${result.message}`);
+        return;
+    }
+
+    lastAIDetectionResult = result;
+    showAIDetectionResult(result);
+
+    sendToServer('/student/event', {
+        student_id: studentId,
+        event_type: 'AI_DETECTION_RESULT',
+        severity:   result.isAI ? 'HIGH' : 'INFO',
+        details: {
+            trigger:         trigger,
+            ai_probability:  result.aiProbability,
+            human_probability: result.humanProbability,
+            verdict:         result.isAI ? 'AI' : 'HUMAN',
+        },
+        timestamp: new Date().toISOString(),
+    });
+}
+
+function callAIDetectionAPI(payload) {
+    return new Promise((resolve) => {
+        const body    = JSON.stringify(payload);
+        const headers = {
+            'Content-Type':   'application/json',
+            'Content-Length': Buffer.byteLength(body),
+        };
+        if (jwtToken) headers['Authorization'] = `Bearer ${jwtToken}`;
+
+        const options = {
+            hostname: CONFIG.SERVER_HOST,
+            port:     CONFIG.SERVER_PORT,
+            path:     '/analyze/ai-detection',
+            method:   'POST',
+            headers:  headers,
+        };
+
+        const req = http.request(options, (res) => {
+            let data = '';
+            res.on('data', chunk => data += chunk);
+            res.on('end', () => {
+                try {
+                    const parsed = JSON.parse(data);
+                    if (res.statusCode !== 200) {
+                        resolve({ success: false, message: parsed.detail || 'AI detection failed' });
+                        return;
+                    }
+                    const aiProbability = Number(
+                        parsed.ai_probability ?? parsed.ai_score ?? parsed.probability ?? 0
+                    );
+                    resolve({
+                        success:           true,
+                        isAI:              parsed.is_ai ?? aiProbability >= 50,
+                        aiProbability:     aiProbability,
+                        humanProbability:  Number(parsed.human_probability ?? (100 - aiProbability)),
+                    });
+                } catch (e) {
+                    resolve({ success: false, message: 'Invalid response from AI detection service' });
+                }
+            });
+        });
+
+        req.on('error', (err) => resolve({ success: false, message: err.message }));
+        req.setTimeout(8000, () => {
+            req.destroy();
+            resolve({ success: false, message: 'AI detection request timed out' });
+        });
+
+        req.write(body);
+        req.end();
+    });
+}
+
+function showAIDetectionResult(result) {
+    if (result.isAI) {
+        statusBarItem.text  = `$(flame) 🤖 AI: ${Math.round(result.aiProbability)}%`;
+        statusBarItem.color = '#F44336';
+    } else {
+        statusBarItem.text  = `$(person) 👤 Human: ${Math.round(result.humanProbability)}%`;
+        statusBarItem.color = '#4CAF50';
+    }
+    statusBarItem.tooltip = 'AI Detection Result — Click for status';
+    statusBarItem.command = 'code-monitor.status';
+
+    // Return the status bar to the normal connection view after a while
+    setTimeout(() => {
+        if (isConnected) updateStatusBar(isIdle ? 'idle' : (isWindowFocused ? 'connected' : 'suspicious'));
+    }, 8000);
 }
 
 // ══════════════════════════════════════════════════════════════
