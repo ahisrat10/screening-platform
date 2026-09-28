@@ -90,6 +90,7 @@ def execute_code(code: str, language: str, stdin: str = "") -> dict:
             "success":        False,
             "output":         "",
             "error":          "Docker is not running! Please start Docker Desktop.",
+            "unavailable":    True,
             "execution_time": 0,
             "language":       language,
         }
@@ -138,6 +139,10 @@ def execute_code(code: str, language: str, stdin: str = "") -> dict:
                 pids_limit       = 50,
                 security_opt     = ["no-new-privileges"],
                 detach           = True,
+                # Never attach stdin: the process sees immediate EOF instead
+                # of blocking on a terminal/pipe nobody will write to.
+                stdin_open       = False,
+                tty              = False,
             )
 
             try:

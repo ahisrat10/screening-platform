@@ -3,6 +3,7 @@ Loads all classical models, scalers, and the Fusion ANN checkpoint once at
 import time and exposes a single `predict_ai_detection()` entry point.
 """
 import io
+import logging
 import os
 import pickle
 import zipfile
@@ -12,7 +13,13 @@ import torch
 from .fusion_ann import FusionANN
 from .feature_extractor import FEATURE_COLUMNS, extract_features
 
+logger = logging.getLogger(__name__)
+
 MODELS_DIR = os.path.join(os.path.dirname(__file__), "models")
+CODEBERT_DIR = os.path.join(MODELS_DIR, "codebert", "final_model")
+UNIXCODER_DIR = os.path.join(MODELS_DIR, "unixcoder", "final_model")
+
+TRANSFORMER_MAX_LENGTH = 512
 
 
 def _load_pickle(name: str):
@@ -53,8 +60,60 @@ fusion_model.eval()
 
 FUSION_FEATURE_NAMES = _load_pickle("feature_names.pkl")
 
-# Placeholder until CodeBERT / UniXcoder inference is wired up.
+# Fallback used for a transformer whenever it fails to load or run.
 _TRANSFORMER_PLACEHOLDER = 0.5
+
+
+def _load_transformer(model_dir: str, name: str):
+    """Load a tokenizer + sequence-classification model from `model_dir`.
+
+    Returns (tokenizer, model), or (None, None) if loading fails for any
+    reason (missing files, bad checkpoint, transformers not installed,
+    etc.) — callers fall back to _TRANSFORMER_PLACEHOLDER in that case.
+    """
+    try:
+        from transformers import AutoModelForSequenceClassification, AutoTokenizer
+
+        tokenizer = AutoTokenizer.from_pretrained(model_dir)
+        model = AutoModelForSequenceClassification.from_pretrained(model_dir)
+        model.eval()
+        return tokenizer, model
+    except Exception:
+        logger.warning("Failed to load %s model from %s; falling back to placeholder 0.5", name, model_dir, exc_info=True)
+        return None, None
+
+
+codebert_tokenizer, codebert_model = _load_transformer(CODEBERT_DIR, "CodeBERT")
+unixcoder_tokenizer, unixcoder_model = _load_transformer(UNIXCODER_DIR, "UniXcoder")
+
+
+def _transformer_prob(tokenizer, model, code: str) -> float:
+    """Probability (class 1 = AI-generated) from a loaded transformer, or
+    the placeholder if the model/tokenizer isn't available."""
+    if tokenizer is None or model is None:
+        return _TRANSFORMER_PLACEHOLDER
+
+    try:
+        inputs = tokenizer(
+            code,
+            return_tensors="pt",
+            truncation=True,
+            padding=True,
+            max_length=TRANSFORMER_MAX_LENGTH,
+        )
+        with torch.no_grad():
+            logits = model(**inputs).logits
+            probs = torch.softmax(logits, dim=-1)
+        return float(probs[0][1].item())
+    except Exception:
+        logger.warning("Transformer inference failed; falling back to placeholder 0.5", exc_info=True)
+        return _TRANSFORMER_PLACEHOLDER
+
+
+def _transformer_scores(code: str):
+    codebert_prob = _transformer_prob(codebert_tokenizer, codebert_model, code)
+    unixcoder_prob = _transformer_prob(unixcoder_tokenizer, unixcoder_model, code)
+    return codebert_prob, unixcoder_prob
 
 
 def _classical_scores(feature_vector):
@@ -70,15 +129,15 @@ def _classical_scores(feature_vector):
     return lr_prob, rf_prob, xgb_prob
 
 
-def _fusion_score(lr_prob, rf_prob, xgb_prob, code_features: dict, behavioral: dict):
+def _fusion_score(lr_prob, rf_prob, xgb_prob, codebert_prob, unixcoder_prob, code_features: dict, behavioral: dict):
     import numpy as np
 
     row = {
         "lr_prob": lr_prob,
         "rf_prob": rf_prob,
         "xgb_prob": xgb_prob,
-        "codebert_prob": _TRANSFORMER_PLACEHOLDER,
-        "unixcoder_prob": _TRANSFORMER_PLACEHOLDER,
+        "codebert_prob": codebert_prob,
+        "unixcoder_prob": unixcoder_prob,
         **code_features,
         **behavioral,
     }
@@ -98,6 +157,7 @@ def predict_ai_detection(code: str, language: str, behavioral_signals: dict) -> 
     feature_vector = [code_features[col] for col in FEATURE_COLUMNS]
 
     lr_prob, rf_prob, xgb_prob = _classical_scores(feature_vector)
+    codebert_prob, unixcoder_prob = _transformer_scores(code)
 
     behavioral = {
         "paste_count": behavioral_signals.get("paste_count", 0),
@@ -107,24 +167,45 @@ def predict_ai_detection(code: str, language: str, behavioral_signals: dict) -> 
         "suspicion_score": behavioral_signals.get("suspicion_score", 0),
     }
 
-    fusion_prob = _fusion_score(lr_prob, rf_prob, xgb_prob, code_features, behavioral)
+    fusion_prob = _fusion_score(lr_prob, rf_prob, xgb_prob, codebert_prob, unixcoder_prob, code_features, behavioral)
 
-    prediction = "AI" if fusion_prob >= 0.5 else "Human"
+    ai_probability = (
+        lr_prob * 0.10
+        + rf_prob * 0.25
+        + xgb_prob * 0.30
+        + codebert_prob * 0.175
+        + unixcoder_prob * 0.175
+    )
+
+    prediction = "AI" if ai_probability >= 0.5 else "Human"
+
+    placeholders_used = []
+    if codebert_model is None:
+        placeholders_used.append("codebert_prob")
+    if unixcoder_model is None:
+        placeholders_used.append("unixcoder_prob")
+
+    if placeholders_used:
+        notes = (
+            f"{' and '.join(placeholders_used)} could not be loaded and used the "
+            "placeholder value (0.5); fusion score quality is reduced until the "
+            "checkpoint is fixed."
+        )
+    else:
+        notes = "All model scores, including codebert_prob and unixcoder_prob, are from loaded checkpoints."
 
     return {
         "prediction": prediction,
-        "confidence": round(fusion_prob if prediction == "AI" else 1 - fusion_prob, 4),
-        "ai_probability": round(fusion_prob, 4),
+        "confidence": round(ai_probability if prediction == "AI" else 1 - ai_probability, 4),
+        "ai_probability": round(ai_probability, 4),
         "model_scores": {
             "logistic_regression": round(lr_prob, 4),
             "random_forest": round(rf_prob, 4),
             "xgboost": round(xgb_prob, 4),
+            "codebert": round(codebert_prob, 4),
+            "unixcoder": round(unixcoder_prob, 4),
             "fusion_ann": round(fusion_prob, 4),
         },
         "code_features": code_features,
-        "notes": (
-            "codebert_prob and unixcoder_prob are placeholder values (0.5) — "
-            "transformer checkpoints were not provided; fusion score quality "
-            "is reduced until real embeddings are wired in."
-        ),
+        "notes": notes,
     }

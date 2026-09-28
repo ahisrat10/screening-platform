@@ -759,13 +759,28 @@ def execute_code_endpoint(
     data: schemas.CodeExecuteRequest,
     db:   Session = Depends(get_db)
 ):
-    from .docker_service import execute_code
+    unavailable = {
+        "success":        False,
+        "output":         "",
+        "error":          "Code execution not available in cloud mode",
+        "execution_time": 0,
+        "language":       data.language,
+        "available":      False,
+    }
+
+    # No docker SDK / no Docker daemon (e.g. Railway) -> friendly JSON, not a 500.
+    try:
+        from .docker_service import execute_code
+    except ImportError:
+        return unavailable
 
     result = execute_code(
         code     = data.code,
         language = data.language,
         stdin    = data.stdin or "",
     )
+    if result.get("unavailable"):
+        return unavailable
 
     submission = models.Submission(
         student_id     = data.student_id or "anonymous",

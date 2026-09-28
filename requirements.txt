@@ -11,3 +11,5 @@ scikit-learn==1.6.1
 xgboost>=2.0
 torch>=2.2
 numpy>=1.26
+transformers>=4.40
+safetensors>=0.4
