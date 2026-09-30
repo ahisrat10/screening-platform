@@ -1193,6 +1193,7 @@ TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
 
 PAGES = {
     "/":               "login.html",
+    "/login":          "login.html",
     "/register":       "register.html",
     "/dashboard":      "dashboard.html",
     "/admin":          "admin.html",
