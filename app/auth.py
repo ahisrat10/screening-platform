@@ -24,11 +24,17 @@ security    = HTTPBearer()
 optional_security = HTTPBearer(auto_error=False)
 
 # ── PASSWORD ───────────────────────────────────────────────────
+def _bcrypt_safe(password: str) -> str:
+    """bcrypt only uses the first 72 BYTES; truncate on a byte boundary
+    (password[:72] would cut characters, not bytes, for non-ASCII input)."""
+    raw = password.encode("utf-8")
+    return raw[:72].decode("utf-8", errors="ignore") if len(raw) > 72 else password
+
 def hash_password(password: str) -> str:
-    return pwd_context.hash(password)
+    return pwd_context.hash(_bcrypt_safe(password))
 
 def verify_password(plain: str, hashed: str) -> bool:
-    return pwd_context.verify(plain, hashed)
+    return pwd_context.verify(_bcrypt_safe(plain), hashed)
 
 # ── JWT TOKEN ──────────────────────────────────────────────────
 def create_token(data: dict) -> str:
