@@ -1199,7 +1199,20 @@ function sendHeartbeat() {
         },
         current_language: editor ? editor.document.languageId : null,
         timestamp:        new Date().toISOString(),
-    });
+    }, handleHeartbeatResponse);
+}
+
+// The teacher can force-disconnect a student; the server says so in the
+// heartbeat reply ({ force_disconnect: true }).
+function handleHeartbeatResponse(reply) {
+    if (!reply || reply.force_disconnect !== true || !isConnected) return;
+
+    stopMonitoring();
+    isConnected = false;
+    studentId   = null;
+    jwtToken    = null;
+    updateStatusBar('disconnected');
+    vscode.window.showWarningMessage('You have been disconnected by the teacher');
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -1302,7 +1315,7 @@ function updateStatusBar(status) {
 // ══════════════════════════════════════════════════════════════
 // SEND TO SERVER — with JWT token
 // ══════════════════════════════════════════════════════════════
-function sendToServer(endpoint, data) {
+function sendToServer(endpoint, data, onResponse) {
     if (!data) return;
 
     const jsonData = JSON.stringify(data);
@@ -1332,8 +1345,13 @@ function sendToServer(endpoint, data) {
                 '✅ Reconnected to exam server!'
             );
         }
-        // Consume response
-        res.on('data', () => {});
+        // Consume response (optionally hand the parsed JSON to the caller)
+        let body = '';
+        res.on('data', (chunk) => { if (onResponse) body += chunk; });
+        res.on('end', () => {
+            if (!onResponse) return;
+            try { onResponse(JSON.parse(body)); } catch (e) { /* non-JSON response */ }
+        });
     });
 
     req.on('error', (err) => {
