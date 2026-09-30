@@ -646,6 +646,8 @@ def analyze_ai_detection(
         behavioral_signals = behavioral_dict,
     )
     code_features = result.get("code_features") or {}
+    # Signals mapped onto the DB/profile column names (see ml/behavioral.py).
+    normalized    = result.get("behavioral_signals") or behavioral_dict
 
     active_exam_session = db.query(models.ExamSession).filter(
         models.ExamSession.student_id == student_id,
@@ -656,7 +658,7 @@ def analyze_ai_detection(
         student_id      = student_id,
         exam_session_id = active_exam_session.id if active_exam_session else None,
         raw_events      = behavioral_dict,
-        **{col: behavioral_dict.get(col, 0) for col in models.BEHAVIORAL_FEATURE_COLUMNS}
+        **{col: normalized.get(col, 0) for col in models.BEHAVIORAL_FEATURE_COLUMNS}
     )
     db.add(behavioral_row)
     db.flush()
@@ -679,7 +681,7 @@ def analyze_ai_detection(
     behavioral_row.submission_id = submission.id
     db.commit()
 
-    _update_student_profile(db, student_id, code_features, behavioral_dict)
+    _update_student_profile(db, student_id, code_features, normalized)
 
     broadcast_event({
         "type":       "AI_DETECTION_RESULT",

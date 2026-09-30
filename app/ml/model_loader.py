@@ -12,6 +12,7 @@ import torch
 
 from .fusion_ann import FusionANN
 from .feature_extractor import FEATURE_COLUMNS, extract_features
+from .behavioral import behavioral_risk_score, has_behavioral_data, normalize_behavioral_signals
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +21,9 @@ CODEBERT_DIR = os.path.join(MODELS_DIR, "codebert", "final_model")
 UNIXCODER_DIR = os.path.join(MODELS_DIR, "unixcoder", "final_model")
 
 TRANSFORMER_MAX_LENGTH = 512
+
+# Weight of the behavioral heuristic in the final ai_probability.
+BEHAVIORAL_BLEND = 0.15
 
 
 def _load_pickle(name: str):
@@ -159,12 +163,17 @@ def predict_ai_detection(code: str, language: str, behavioral_signals: dict) -> 
     lr_prob, rf_prob, xgb_prob = _classical_scores(feature_vector)
     codebert_prob, unixcoder_prob = _transformer_scores(code)
 
+    # Accept the extension's field names (total_pastes, total_tab_switches,
+    # backspace_frequency, suspicious_score, ...) as well as the legacy ones.
+    sig = normalize_behavioral_signals(behavioral_signals)
+
+    # The fusion ANN was trained on exactly these five behavioral inputs.
     behavioral = {
-        "paste_count": behavioral_signals.get("paste_count", 0),
-        "typing_ratio": behavioral_signals.get("typing_ratio", 0.0),
-        "tab_switch": behavioral_signals.get("tab_switches", 0),
-        "backspace_freq": behavioral_signals.get("backspace_freq", 0.0),
-        "suspicion_score": behavioral_signals.get("suspicion_score", 0),
+        "paste_count": sig["paste_count"],
+        "typing_ratio": sig["typing_ratio"],
+        "tab_switch": sig["tab_switches"],
+        "backspace_freq": sig["backspace_freq"],
+        "suspicion_score": sig["suspicion_score"],
     }
 
     fusion_prob = _fusion_score(lr_prob, rf_prob, xgb_prob, codebert_prob, unixcoder_prob, code_features, behavioral)
@@ -176,6 +185,14 @@ def predict_ai_detection(code: str, language: str, behavioral_signals: dict) -> 
         + codebert_prob * 0.175
         + unixcoder_prob * 0.175
     )
+
+    # The fusion ANN can only see 5 behavioral inputs (fixed at training
+    # time), so the remaining signals feed a separate heuristic risk score
+    # that is blended in only when the client actually sent telemetry.
+    behavioral_risk, behavioral_breakdown = behavioral_risk_score(sig)
+    behavioral_used = has_behavioral_data(sig)
+    if behavioral_used:
+        ai_probability = ai_probability * (1 - BEHAVIORAL_BLEND) + behavioral_risk * BEHAVIORAL_BLEND
 
     prediction = "AI" if ai_probability >= 0.5 else "Human"
 
@@ -194,6 +211,11 @@ def predict_ai_detection(code: str, language: str, behavioral_signals: dict) -> 
     else:
         notes = "All model scores, including codebert_prob and unixcoder_prob, are from loaded checkpoints."
 
+    if behavioral_used:
+        notes += f" Behavioral risk score {behavioral_risk} (11 signals) blended at {BEHAVIORAL_BLEND:.0%}."
+    else:
+        notes += " No behavioral telemetry received; behavioral score not applied."
+
     return {
         "prediction": prediction,
         "confidence": round(ai_probability if prediction == "AI" else 1 - ai_probability, 4),
@@ -207,5 +229,8 @@ def predict_ai_detection(code: str, language: str, behavioral_signals: dict) -> 
             "fusion_ann": round(fusion_prob, 4),
         },
         "code_features": code_features,
+        "behavioral_risk": behavioral_risk,
+        "behavioral_breakdown": behavioral_breakdown,
+        "behavioral_signals": sig,
         "notes": notes,
     }

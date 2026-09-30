@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr, field_validator
+from pydantic import AliasChoices, BaseModel, EmailStr, Field, field_validator
 from typing import Optional
 import re
 
@@ -171,6 +171,26 @@ class BehavioralSignals(BaseModel):
     backspace_freq:  float = 0.0
     suspicion_score: float = 0.0
 
+    # Field names exactly as the VS Code extension's collectBehavioralSignals()
+    # sends them. Mapped onto the names above/below by
+    # app.ml.behavioral.normalize_behavioral_signals.
+    total_pastes:                float = 0
+    total_tab_switches:          float = 0
+    suspicious_score:            float = 0.0
+    session_duration_ms:         float = 0.0
+    undo_count:                  int   = 0
+    redo_count:                  int   = 0
+    scroll_event_count:          int   = 0
+    total_idle_events:           int   = 0
+    keys_per_minute_avg:         float = 0.0
+    keystroke_rhythm_stddev_ms:  float = 0.0
+    avg_time_between_keys_ms:    float = 0.0
+    sudden_code_jump_count:      int   = 0
+    code_deletion_events:        int   = 0
+    copy_from_same_file_count:   int   = 0
+    screen_freeze_events:        int   = 0
+    sudden_skill_jump_count:     int   = 0
+
     # Full 34-feature behavioral telemetry — persisted to behavioral_data,
     # not consumed by the fusion model directly.
     large_paste_count:       int   = 0
@@ -210,7 +230,11 @@ class AIDetectionRequest(BaseModel):
     student_id:  Optional[str] = None
     code:        str
     language:    str
-    behavioral:  BehavioralSignals = BehavioralSignals()
+    # The extension posts this under "signals"; older clients use "behavioral".
+    behavioral:  BehavioralSignals = Field(
+        default_factory=BehavioralSignals,
+        validation_alias=AliasChoices("signals", "behavioral"),
+    )
     timestamp:   Optional[str] = None
 
 class ModelScores(BaseModel):
