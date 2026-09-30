@@ -1,0 +1,684 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Teacher Dashboard — Screening Platform</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  .scrollbar-thin::-webkit-scrollbar { width: 6px; height: 6px; }
+  .scrollbar-thin::-webkit-scrollbar-track { background: #1f2937; }
+  .scrollbar-thin::-webkit-scrollbar-thumb { background: #4b5563; border-radius: 3px; }
+  .code-view { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; line-height: 1.5; }
+  .drawer { transition: transform .2s ease; }
+  .drawer.closed { transform: translateX(100%); }
+  input[type=radio].sr { position: absolute; opacity: 0; }
+  .radio-pill { cursor: pointer; }
+  input[type=radio]:checked + .radio-pill.human  { background: #166534; border-color: #22c55e; color: #fff; }
+  input[type=radio]:checked + .radio-pill.ai     { background: #991b1b; border-color: #ef4444; color: #fff; }
+  input[type=radio]:checked + .radio-pill.unsure { background: #854d0e; border-color: #eab308; color: #fff; }
+</style>
+</head>
+<body class="bg-gray-950 min-h-screen text-gray-200">
+
+<!-- Header -->
+<div class="bg-gray-900 border-b border-gray-800 px-6 py-3 sticky top-0 z-30">
+  <div class="flex justify-between items-center flex-wrap gap-3">
+    <div class="flex items-center gap-3">
+      <span class="text-2xl">🎓</span>
+      <div>
+        <h1 class="text-white font-bold text-lg leading-tight">Teacher Dashboard</h1>
+        <p class="text-gray-500 text-xs">Automated Technical Screening Platform</p>
+      </div>
+    </div>
+    <div class="flex items-center gap-4">
+      <div id="refresh_badge"
+        class="flex items-center gap-2 px-3 py-1 rounded-full text-xs bg-gray-800 text-gray-400 font-medium">
+        <span id="refresh_dot" class="w-2 h-2 rounded-full bg-gray-500"></span>
+        <span id="refresh_text">Loading…</span>
+      </div>
+      <div class="text-right">
+        <p id="teacher_name" class="text-white text-sm font-medium"></p>
+        <p class="text-gray-500 text-xs">Teacher</p>
+      </div>
+      <button onclick="logout()"
+        class="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition">
+        Logout
+      </button>
+    </div>
+  </div>
+</div>
+
+<div class="max-w-screen-xl mx-auto p-5">
+
+  <!-- SECTION 4 — Summary stats -->
+  <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+    <div class="bg-gray-900 rounded-xl p-4 border border-green-800">
+      <p class="text-gray-400 text-xs mb-1">Students Online</p>
+      <p class="text-3xl font-bold text-green-400"><span id="s_online">—</span><span class="text-base text-gray-500 font-normal"> / <span id="s_total">—</span></span></p>
+    </div>
+    <div class="bg-gray-900 rounded-xl p-4 border border-red-800">
+      <p class="text-gray-400 text-xs mb-1">Suspicious Flags</p>
+      <p id="s_flags" class="text-3xl font-bold text-red-400">—</p>
+    </div>
+    <div class="bg-gray-900 rounded-xl p-4 border border-blue-800">
+      <p class="text-gray-400 text-xs mb-1">Labels Submitted Today</p>
+      <p id="s_labels" class="text-3xl font-bold text-blue-400">—</p>
+    </div>
+    <div class="bg-gray-900 rounded-xl p-4 border border-yellow-800">
+      <p class="text-gray-400 text-xs mb-1">Avg Suspicion (online)</p>
+      <p id="s_avg" class="text-3xl font-bold text-yellow-400">—</p>
+    </div>
+  </div>
+
+  <!-- SECTION 2 — Exam control -->
+  <div class="bg-gray-900 rounded-xl border border-gray-800 mb-6">
+    <div class="p-4 border-b border-gray-800 flex justify-between items-center flex-wrap gap-3">
+      <div class="flex items-center gap-3">
+        <h2 class="text-white font-semibold">📝 Exam Control</h2>
+        <span id="exam_badge" class="px-3 py-1 rounded-full text-xs font-medium bg-gray-800 text-gray-400">—</span>
+      </div>
+      <div class="flex items-center gap-3">
+        <span id="exam_time" class="text-gray-500 text-xs"></span>
+        <button id="exam_btn" onclick="toggleExam()"
+          class="px-4 py-2 rounded-lg text-sm font-medium text-white bg-green-600 hover:bg-green-700 transition disabled:opacity-50">
+          Start Exam
+        </button>
+      </div>
+    </div>
+    <div class="grid lg:grid-cols-2 gap-0 lg:divide-x divide-gray-800">
+      <div class="p-4">
+        <p class="text-gray-500 text-xs uppercase font-medium mb-2">Active Problem</p>
+        <div id="problem_view" class="text-sm text-gray-500">No problem posted yet.</div>
+      </div>
+      <form class="p-4 space-y-3" onsubmit="saveProblem(event)">
+        <p class="text-gray-500 text-xs uppercase font-medium">Post / Replace Problem</p>
+        <input id="p_title" maxlength="200" placeholder="Title" required
+          class="w-full bg-gray-800 text-white text-sm px-3 py-2 rounded-lg border border-gray-700 focus:outline-none focus:border-blue-500"/>
+        <textarea id="p_desc" rows="4" placeholder="Problem description…" required
+          class="w-full bg-gray-800 text-white text-sm px-3 py-2 rounded-lg border border-gray-700 focus:outline-none focus:border-blue-500"></textarea>
+        <div class="flex items-center gap-3">
+          <input id="p_limit" type="number" min="1" max="600" placeholder="Time limit (min)"
+            class="w-44 bg-gray-800 text-white text-sm px-3 py-2 rounded-lg border border-gray-700 focus:outline-none focus:border-blue-500"/>
+          <button type="submit"
+            class="ml-auto bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition">
+            Save Problem
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- SECTION 1 — Live monitor -->
+  <div class="bg-gray-900 rounded-xl border border-gray-800">
+    <div class="p-4 border-b border-gray-800 flex justify-between items-center flex-wrap gap-3">
+      <h2 class="text-white font-semibold">👥 Live Monitor</h2>
+      <div class="flex items-center gap-3 flex-wrap">
+        <div class="flex gap-1 bg-gray-950 rounded-lg p-1 border border-gray-800">
+          <button id="f_all"        onclick="setFilter('all')"        class="px-3 py-1 rounded-md text-xs font-medium">All</button>
+          <button id="f_online"     onclick="setFilter('online')"     class="px-3 py-1 rounded-md text-xs font-medium">🟢 Online</button>
+          <button id="f_suspicious" onclick="setFilter('suspicious')" class="px-3 py-1 rounded-md text-xs font-medium">⚠️ Suspicious</button>
+        </div>
+        <input id="search" oninput="renderStudents()" placeholder="Search name or ID…"
+          class="bg-gray-800 text-white text-sm px-3 py-1.5 rounded-lg border border-gray-700 focus:outline-none focus:border-blue-500 w-48"/>
+      </div>
+    </div>
+
+    <div class="overflow-x-auto scrollbar-thin">
+      <table class="w-full text-sm min-w-[760px]">
+        <thead>
+          <tr class="text-gray-500 text-xs uppercase border-b border-gray-800">
+            <th class="text-left font-medium px-4 py-2">Student</th>
+            <th class="text-left font-medium px-4 py-2">ID</th>
+            <th class="text-center font-medium px-4 py-2">Status</th>
+            <th class="text-center font-medium px-4 py-2">Suspicion</th>
+            <th class="text-left font-medium px-4 py-2">Last Heartbeat</th>
+            <th class="text-right font-medium px-4 py-2">Quick Actions</th>
+          </tr>
+        </thead>
+        <tbody id="student_rows" class="divide-y divide-gray-800">
+          <tr><td colspan="6" class="p-8 text-center text-gray-500">Loading students…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- Side panel -->
+<div id="overlay" onclick="closePanel()" class="hidden fixed inset-0 bg-black bg-opacity-60 z-40"></div>
+<aside id="panel" class="drawer closed fixed top-0 right-0 h-full w-full max-w-xl bg-gray-900 border-l border-gray-700 z-50 flex flex-col">
+  <div class="p-4 border-b border-gray-700 flex justify-between items-start">
+    <div>
+      <div class="flex items-center gap-2">
+        <span id="pn_dot" class="w-3 h-3 rounded-full bg-gray-500"></span>
+        <h2 id="pn_name" class="text-lg font-bold text-white"></h2>
+      </div>
+      <p id="pn_id" class="text-gray-400 text-xs mt-1"></p>
+    </div>
+    <button onclick="closePanel()" class="text-gray-500 hover:text-white text-3xl leading-none">&times;</button>
+  </div>
+
+  <div class="flex-1 overflow-y-auto scrollbar-thin p-4 space-y-5">
+    <div id="pn_empty" class="hidden bg-yellow-900/30 border border-yellow-800 text-yellow-300 text-sm rounded-lg p-3">
+      This student has no session yet — nothing to show or label.
+    </div>
+
+    <!-- quick actions -->
+    <div class="flex gap-2 flex-wrap">
+      <button onclick="warnStudent(selectedId)" class="px-3 py-1.5 rounded-lg text-xs font-medium bg-yellow-700 hover:bg-yellow-600 text-white">⚠️ Send Warning</button>
+      <button onclick="disconnectStudent(selectedId)" class="px-3 py-1.5 rounded-lg text-xs font-medium bg-red-700 hover:bg-red-600 text-white">⏏ Force Disconnect</button>
+      <button onclick="openReport(selectedId)" class="px-3 py-1.5 rounded-lg text-xs font-medium bg-gray-700 hover:bg-gray-600 text-white">📄 Full Report</button>
+    </div>
+
+    <!-- AI detection -->
+    <section>
+      <h3 class="text-gray-400 text-xs uppercase font-medium mb-2">AI Detection</h3>
+      <div id="pn_ai" class="bg-gray-950 border border-gray-800 rounded-lg p-3 text-sm text-gray-500">No detection run yet.</div>
+    </section>
+
+    <!-- Behavioral signals -->
+    <section>
+      <h3 class="text-gray-400 text-xs uppercase font-medium mb-2">Behavioral Signals <span id="pn_tel_note" class="normal-case text-gray-600"></span></h3>
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
+        <div class="bg-gray-950 border border-gray-800 rounded-lg p-2"><p class="text-gray-500 text-[11px]">Pastes</p><p id="sg_paste" class="text-lg font-bold text-yellow-400">—</p></div>
+        <div class="bg-gray-950 border border-gray-800 rounded-lg p-2"><p class="text-gray-500 text-[11px]">Backspaces</p><p id="sg_bs" class="text-lg font-bold text-white">—</p></div>
+        <div class="bg-gray-950 border border-gray-800 rounded-lg p-2"><p class="text-gray-500 text-[11px]">Typing (keys/min)</p><p id="sg_kpm" class="text-lg font-bold text-white">—</p></div>
+        <div class="bg-gray-950 border border-gray-800 rounded-lg p-2"><p class="text-gray-500 text-[11px]">Undo count</p><p id="sg_undo" class="text-lg font-bold text-white">—</p></div>
+        <div class="bg-gray-950 border border-gray-800 rounded-lg p-2"><p class="text-gray-500 text-[11px]">Tab switches</p><p id="sg_tabs" class="text-lg font-bold text-orange-400">—</p></div>
+        <div class="bg-gray-950 border border-gray-800 rounded-lg p-2"><p class="text-gray-500 text-[11px]">Scroll events</p><p id="sg_scroll" class="text-lg font-bold text-white">—</p></div>
+        <div class="bg-gray-950 border border-gray-800 rounded-lg p-2 col-span-2"><p class="text-gray-500 text-[11px]">Suspicious score</p><p id="sg_susp" class="text-lg font-bold">—</p></div>
+      </div>
+    </section>
+
+    <!-- Code -->
+    <section>
+      <div class="flex justify-between items-center mb-2">
+        <h3 class="text-gray-400 text-xs uppercase font-medium">Current Code (read-only)</h3>
+        <span id="pn_code_meta" class="text-gray-600 text-[11px]"></span>
+      </div>
+      <div class="bg-gray-950 border border-gray-800 rounded-lg overflow-auto max-h-80 scrollbar-thin">
+        <div class="flex code-view">
+          <pre id="pn_ln" class="text-gray-600 text-right select-none px-2 py-2 border-r border-gray-800"></pre>
+          <pre id="pn_code" class="text-green-300 px-3 py-2 flex-1" tabindex="0"></pre>
+        </div>
+      </div>
+    </section>
+
+    <!-- Warnings -->
+    <section>
+      <h3 class="text-gray-400 text-xs uppercase font-medium mb-2">Warnings Sent</h3>
+      <div id="pn_warnings" class="space-y-1 text-sm text-gray-500">None.</div>
+    </section>
+
+    <!-- Label form -->
+    <section>
+      <h3 class="text-gray-400 text-xs uppercase font-medium mb-2">Label this session</h3>
+      <form id="label_form" onsubmit="submitLabel(event)" class="bg-gray-950 border border-gray-800 rounded-lg p-3 space-y-3">
+        <div class="flex gap-2 relative">
+          <label><input type="radio" class="sr" name="lbl" value="human"><span class="radio-pill human inline-block px-4 py-1.5 rounded-lg border border-gray-700 text-sm text-gray-300">Human</span></label>
+          <label><input type="radio" class="sr" name="lbl" value="ai"><span class="radio-pill ai inline-block px-4 py-1.5 rounded-lg border border-gray-700 text-sm text-gray-300">AI</span></label>
+          <label><input type="radio" class="sr" name="lbl" value="unsure"><span class="radio-pill unsure inline-block px-4 py-1.5 rounded-lg border border-gray-700 text-sm text-gray-300">Unsure</span></label>
+        </div>
+        <div class="flex items-center gap-3">
+          <label for="lbl_conf" class="text-gray-400 text-sm">Confidence</label>
+          <select id="lbl_conf" class="bg-gray-800 text-white text-sm px-3 py-1.5 rounded-lg border border-gray-700 focus:outline-none focus:border-blue-500">
+            <option value="1">1 — guess</option><option value="2">2</option><option value="3" selected>3</option><option value="4">4</option><option value="5">5 — certain</option>
+          </select>
+        </div>
+        <textarea id="lbl_notes" rows="3" maxlength="1000" placeholder="Notes (optional)…"
+          class="w-full bg-gray-800 text-white text-sm px-3 py-2 rounded-lg border border-gray-700 focus:outline-none focus:border-blue-500"></textarea>
+        <button id="lbl_submit" type="submit"
+          class="w-full bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-lg text-sm font-medium transition disabled:opacity-50">
+          Submit Label
+        </button>
+      </form>
+    </section>
+  </div>
+</aside>
+
+<!-- Report modal -->
+<div id="report_modal" class="hidden fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center z-[60] p-4">
+  <div class="bg-gray-900 rounded-2xl border border-gray-700 w-full max-w-4xl max-h-[90vh] flex flex-col">
+    <div class="p-5 border-b border-gray-700 flex justify-between items-start">
+      <div>
+        <h2 id="rp_name" class="text-xl font-bold text-white"></h2>
+        <p id="rp_meta" class="text-gray-400 text-sm mt-1"></p>
+      </div>
+      <button onclick="closeReport()" class="text-gray-500 hover:text-white text-3xl leading-none">&times;</button>
+    </div>
+    <div id="rp_body" class="p-5 overflow-y-auto scrollbar-thin space-y-6 text-sm"></div>
+  </div>
+</div>
+
+<!-- Generic dialog (replaces prompt/confirm) -->
+<div id="dlg" class="hidden fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-[70] p-4">
+  <div class="bg-gray-900 rounded-xl border border-gray-700 w-full max-w-md p-5">
+    <h3 id="dlg_title" class="text-white font-semibold mb-2"></h3>
+    <p id="dlg_msg" class="text-gray-400 text-sm mb-3"></p>
+    <textarea id="dlg_input" rows="3" maxlength="500"
+      class="hidden w-full bg-gray-800 text-white text-sm px-3 py-2 rounded-lg border border-gray-700 focus:outline-none focus:border-blue-500 mb-3"></textarea>
+    <div class="flex justify-end gap-2">
+      <button id="dlg_cancel" class="px-4 py-2 rounded-lg text-sm bg-gray-700 hover:bg-gray-600 text-white">Cancel</button>
+      <button id="dlg_ok" class="px-4 py-2 rounded-lg text-sm bg-blue-600 hover:bg-blue-700 text-white">OK</button>
+    </div>
+  </div>
+</div>
+
+<!-- Toasts -->
+<div id="toasts" class="fixed bottom-5 right-5 z-[80] space-y-2"></div>
+
+<script>
+const API  = 'https://screening-platform-production.up.railway.app';
+const token = localStorage.getItem('token');
+const role  = localStorage.getItem('role');
+const POLL_MS = 10000;
+const SUSPICIOUS = 50;
+
+if (!token || (role !== 'teacher' && role !== 'admin')) {
+  window.location.href = '/';
+}
+document.getElementById('teacher_name').textContent = localStorage.getItem('full_name') || 'Teacher';
+
+let students   = [];
+let filter     = 'all';
+let selectedId = null;
+let examActive = false;
+let lastCode   = null;
+
+// ── helpers ────────────────────────────────────────────────────
+function esc(v) {
+  return String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+function parseUTC(s) {
+  if (!s) return null;
+  let t = String(s).replace(' ', 'T');
+  if (!/[zZ]|[+-]\d\d:?\d\d$/.test(t)) t += 'Z';
+  const d = new Date(t);
+  return isNaN(d) ? null : d;
+}
+function ago(s) {
+  const d = parseUTC(s);
+  if (!d) return '—';
+  const sec = Math.max(0, Math.round((Date.now() - d) / 1000));
+  if (sec < 60)   return sec + 's ago';
+  if (sec < 3600) return Math.floor(sec / 60) + 'm ago';
+  if (sec < 86400) return Math.floor(sec / 3600) + 'h ago';
+  return Math.floor(sec / 86400) + 'd ago';
+}
+function fmt(s) { const d = parseUTC(s); return d ? d.toLocaleString() : '—'; }
+function scoreColor(n) { return n >= 70 ? 'text-red-400' : n >= SUSPICIOUS ? 'text-orange-400' : n >= 25 ? 'text-yellow-400' : 'text-green-400'; }
+function barColor(n)   { return n >= 70 ? 'bg-red-500'   : n >= SUSPICIOUS ? 'bg-orange-500'   : n >= 25 ? 'bg-yellow-500'   : 'bg-green-500'; }
+
+async function api(path, opts = {}) {
+  const res = await fetch(API + path, {
+    ...opts,
+    headers: { 'Authorization': `Bearer ${token}`, ...(opts.body ? {'Content-Type': 'application/json'} : {}) },
+  });
+  if (res.status === 401) { localStorage.clear(); window.location.href = '/'; throw new Error('Session expired'); }
+  let data = null;
+  try { data = await res.json(); } catch (e) {}
+  if (!res.ok) {
+    let msg = data && data.detail;
+    if (Array.isArray(msg)) msg = msg.map(m => m.msg).join('; ');
+    const err = new Error(msg || `Request failed (${res.status})`);
+    err.status = res.status;
+    throw err;
+  }
+  return data;
+}
+function post(path, body) { return api(path, { method: 'POST', body: body === undefined ? undefined : JSON.stringify(body) }); }
+
+function toast(msg, kind = 'info') {
+  const colors = { info: 'bg-gray-800 border-gray-600', ok: 'bg-green-900 border-green-700', err: 'bg-red-900 border-red-700' };
+  const el = document.createElement('div');
+  el.className = `${colors[kind]} border text-white text-sm px-4 py-2 rounded-lg shadow-lg max-w-sm`;
+  el.textContent = msg;
+  document.getElementById('toasts').appendChild(el);
+  setTimeout(() => el.remove(), 4000);
+}
+
+function dialog({ title, message = '', input = null, okText = 'OK', danger = false }) {
+  return new Promise(resolve => {
+    const dlg = document.getElementById('dlg'), ta = document.getElementById('dlg_input');
+    document.getElementById('dlg_title').textContent = title;
+    document.getElementById('dlg_msg').textContent = message;
+    const ok = document.getElementById('dlg_ok'), cancel = document.getElementById('dlg_cancel');
+    ok.textContent = okText;
+    ok.className = `px-4 py-2 rounded-lg text-sm text-white ${danger ? 'bg-red-600 hover:bg-red-700' : 'bg-blue-600 hover:bg-blue-700'}`;
+    ta.classList.toggle('hidden', input === null);
+    if (input !== null) ta.value = input;
+    dlg.classList.remove('hidden');
+    if (input !== null) ta.focus();
+    const done = (val) => { dlg.classList.add('hidden'); ok.onclick = cancel.onclick = null; resolve(val); };
+    ok.onclick = () => done(input !== null ? ta.value.trim() : true);
+    cancel.onclick = () => done(null);
+  });
+}
+
+function logout() { localStorage.clear(); window.location.href = '/'; }
+
+// ── SECTION 4: summary ─────────────────────────────────────────
+async function loadSummary() {
+  const s = await api('/teacher/summary');
+  document.getElementById('s_online').textContent = s.online;
+  document.getElementById('s_total').textContent  = s.students_total;
+  document.getElementById('s_flags').textContent  = s.suspicious_flags;
+  document.getElementById('s_labels').textContent = s.labels_today;
+  document.getElementById('s_avg').textContent    = s.avg_suspicion;
+}
+
+// ── SECTION 2: exam control ────────────────────────────────────
+async function loadExam() {
+  const d = await api('/teacher/problem/current');
+  examActive = d.exam.is_active;
+
+  const badge = document.getElementById('exam_badge');
+  badge.textContent = examActive ? '● Active' : '○ Inactive';
+  badge.className = 'px-3 py-1 rounded-full text-xs font-medium ' + (examActive ? 'bg-green-900 text-green-300' : 'bg-gray-800 text-gray-400');
+
+  const btn = document.getElementById('exam_btn');
+  btn.textContent = examActive ? 'End Exam' : 'Start Exam';
+  btn.className = 'px-4 py-2 rounded-lg text-sm font-medium text-white transition disabled:opacity-50 ' +
+    (examActive ? 'bg-red-600 hover:bg-red-700' : 'bg-green-600 hover:bg-green-700');
+
+  document.getElementById('exam_time').textContent = examActive
+    ? 'Started ' + fmt(d.exam.started_at)
+    : (d.exam.ended_at ? 'Ended ' + fmt(d.exam.ended_at) : '');
+
+  const pv = document.getElementById('problem_view');
+  if (d.problem) {
+    pv.innerHTML = `<h3 class="text-white font-semibold">${esc(d.problem.title)}</h3>
+      <p class="text-gray-300 whitespace-pre-wrap mt-1">${esc(d.problem.description)}</p>
+      <p class="text-gray-500 text-xs mt-2">${d.problem.time_limit ? `⏱ ${d.problem.time_limit} min · ` : ''}posted ${esc(fmt(d.problem.created_at))}</p>`;
+  } else {
+    pv.className = 'text-sm text-gray-500';
+    pv.textContent = 'No problem posted yet.';
+  }
+}
+
+async function toggleExam() {
+  const btn = document.getElementById('exam_btn');
+  if (examActive) {
+    const ok = await dialog({ title: 'End exam?', message: 'The exam will be marked as ended.', okText: 'End Exam', danger: true });
+    if (!ok) return;
+  }
+  btn.disabled = true;
+  try {
+    await post(examActive ? '/teacher/exam/end' : '/teacher/exam/start');
+    toast(examActive ? 'Exam ended' : 'Exam started', 'ok');
+    await loadExam();
+  } catch (e) { toast(e.message, 'err'); }
+  btn.disabled = false;
+}
+
+async function saveProblem(ev) {
+  ev.preventDefault();
+  const limit = document.getElementById('p_limit').value;
+  try {
+    await post('/teacher/problem', {
+      title: document.getElementById('p_title').value,
+      description: document.getElementById('p_desc').value,
+      time_limit: limit ? parseInt(limit, 10) : null,
+    });
+    toast('Problem saved', 'ok');
+    ev.target.reset();
+    await loadExam();
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+// ── SECTION 1: live monitor ────────────────────────────────────
+async function loadStudents() {
+  students = await api('/teacher/students?active_only=false');
+  renderStudents();
+}
+
+function setFilter(f) { filter = f; renderStudents(); }
+
+function renderStudents() {
+  ['all', 'online', 'suspicious'].forEach(f => {
+    document.getElementById('f_' + f).className =
+      'px-3 py-1 rounded-md text-xs font-medium transition ' + (f === filter ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white');
+  });
+  const q = document.getElementById('search').value.trim().toLowerCase();
+  const rows = students
+    .filter(s => filter === 'online' ? s.is_connected : filter === 'suspicious' ? s.suspicious_score >= SUSPICIOUS : true)
+    .filter(s => !q || (s.full_name || '').toLowerCase().includes(q) || s.student_id.toLowerCase().includes(q))
+    .sort((a, b) => (b.is_connected - a.is_connected) || (b.suspicious_score - a.suspicious_score));
+
+  const body = document.getElementById('student_rows');
+  if (!rows.length) {
+    body.innerHTML = `<tr><td colspan="6" class="p-8 text-center text-gray-500">No students match this filter.</td></tr>`;
+    return;
+  }
+  body.innerHTML = rows.map(s => {
+    const id = esc(s.student_id), n = s.suspicious_score || 0;
+    return `<tr class="hover:bg-gray-800/60 cursor-pointer ${s.student_id === selectedId ? 'bg-gray-800/60' : ''}" onclick="openPanel('${id}')">
+      <td class="px-4 py-3 text-white font-medium">${esc(s.full_name || '—')}</td>
+      <td class="px-4 py-3 text-gray-400">${id}</td>
+      <td class="px-4 py-3 text-center">${s.is_connected
+        ? '<span class="inline-flex items-center gap-1.5 text-green-400 text-xs"><span class="w-2 h-2 rounded-full bg-green-400"></span>Online</span>'
+        : '<span class="inline-flex items-center gap-1.5 text-gray-500 text-xs"><span class="w-2 h-2 rounded-full bg-gray-600"></span>Offline</span>'}</td>
+      <td class="px-4 py-3"><div class="flex items-center gap-2 justify-center">
+        <div class="w-20 h-1.5 bg-gray-800 rounded-full overflow-hidden"><div class="h-full ${barColor(n)}" style="width:${Math.min(100, n)}%"></div></div>
+        <span class="text-xs font-bold w-7 ${scoreColor(n)}">${n}</span></div></td>
+      <td class="px-4 py-3 text-gray-400 text-xs">${esc(ago(s.last_heartbeat))}</td>
+      <td class="px-4 py-3 text-right whitespace-nowrap" onclick="event.stopPropagation()">
+        <button onclick="warnStudent('${id}')" class="px-2 py-1 rounded text-xs bg-yellow-700 hover:bg-yellow-600 text-white">Warn</button>
+        <button onclick="disconnectStudent('${id}')" class="px-2 py-1 rounded text-xs bg-red-700 hover:bg-red-600 text-white">Disconnect</button>
+        <button onclick="openReport('${id}')" class="px-2 py-1 rounded text-xs bg-gray-700 hover:bg-gray-600 text-white">Report</button>
+      </td></tr>`;
+  }).join('');
+}
+
+// ── side panel ─────────────────────────────────────────────────
+let panelSession = null;
+
+function openPanel(id) {
+  if (selectedId !== id) {
+    selectedId = id;
+    lastCode = null;
+    panelSession = null;
+    document.getElementById('label_form').reset();
+    document.getElementById('lbl_conf').value = '3';
+    ['pn_code', 'pn_ln'].forEach(i => document.getElementById(i).textContent = '');
+  }
+  const s = students.find(x => x.student_id === id);
+  document.getElementById('pn_name').textContent = s ? (s.full_name || id) : id;
+  document.getElementById('pn_id').textContent = id;
+  document.getElementById('overlay').classList.remove('hidden');
+  document.getElementById('panel').classList.remove('closed');
+  renderStudents();
+  loadPanel();
+}
+
+function closePanel() {
+  selectedId = null;
+  document.getElementById('overlay').classList.add('hidden');
+  document.getElementById('panel').classList.add('closed');
+  renderStudents();
+}
+
+async function loadPanel() {
+  const id = selectedId;
+  if (!id) return;
+  let d;
+  try {
+    d = await api(`/teacher/student/${encodeURIComponent(id)}/session`);
+  } catch (e) {
+    if (id !== selectedId) return;
+    if (e.status === 404) { panelSession = null; document.getElementById('pn_empty').classList.remove('hidden'); document.getElementById('lbl_submit').disabled = true; }
+    else toast(e.message, 'err');
+    return;
+  }
+  if (id !== selectedId) return;   // user switched student meanwhile
+  panelSession = d;
+  document.getElementById('pn_empty').classList.add('hidden');
+  document.getElementById('lbl_submit').disabled = false;
+  document.getElementById('pn_name').textContent = d.full_name || id;
+  document.getElementById('pn_dot').className = 'w-3 h-3 rounded-full ' + (d.is_connected ? 'bg-green-400' : 'bg-gray-500');
+
+  // AI detection
+  const ai = d.ai_detection, aiEl = document.getElementById('pn_ai');
+  if (ai) {
+    const isAI = String(ai.prediction).toUpperCase() === 'AI';
+    const pct = ai.ai_probability != null ? (ai.ai_probability * 100).toFixed(1) : '—';
+    const ms = ai.model_scores || {};
+    aiEl.innerHTML = `<div class="flex items-center gap-3">
+        <span class="px-3 py-1 rounded-full text-sm font-bold ${isAI ? 'bg-red-900 text-red-300' : 'bg-green-900 text-green-300'}">${isAI ? 'AI' : 'Human'}</span>
+        <span class="text-white text-sm">AI score <b class="${isAI ? 'text-red-400' : 'text-green-400'}">${pct}%</b></span>
+        <span class="text-gray-600 text-xs ml-auto">${esc(ago(ai.timestamp))}</span></div>
+      <div class="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-400">
+        ${Object.entries(ms).map(([k, v]) => `<span>${esc(k.replace(/_/g, ' '))}: <b class="text-gray-200">${Number(v).toFixed(2)}</b></span>`).join('')}</div>`;
+    aiEl.className = 'bg-gray-950 border border-gray-800 rounded-lg p-3 text-sm';
+  } else {
+    aiEl.className = 'bg-gray-950 border border-gray-800 rounded-lg p-3 text-sm text-gray-500';
+    aiEl.textContent = 'No detection run yet.';
+  }
+
+  // Signals
+  const g = d.signals_summary || {};
+  const num = (v, dp = 0) => (v == null ? '—' : Number(v).toFixed(dp).replace(/\.0+$/, ''));
+  document.getElementById('sg_paste').textContent  = num(g.paste_count);
+  document.getElementById('sg_bs').textContent     = num(g.backspace_freq);
+  document.getElementById('sg_kpm').textContent    = num(g.typing_speed_kpm);
+  document.getElementById('sg_undo').textContent   = num(g.undo_count);
+  document.getElementById('sg_tabs').textContent   = num(g.tab_switches);
+  document.getElementById('sg_scroll').textContent = num(g.scroll_events);
+  const sp = document.getElementById('sg_susp');
+  sp.textContent = num(g.suspicious_score);
+  sp.className = 'text-lg font-bold ' + scoreColor(g.suspicious_score || 0);
+  document.getElementById('pn_tel_note').textContent = g.has_telemetry ? '' : '(no telemetry recorded yet — showing event counts)';
+
+  // Code
+  const cs = d.code_snapshot;
+  if (cs) {
+    if (cs.code !== lastCode) {
+      lastCode = cs.code;
+      const lines = (cs.code || '').split('\n');
+      document.getElementById('pn_code').textContent = cs.code || '';
+      document.getElementById('pn_ln').textContent = lines.map((_, i) => i + 1).join('\n');
+    }
+    document.getElementById('pn_code_meta').textContent =
+      `${cs.filename ? cs.filename.split(/[\\/]/).pop() : ''} · ${cs.language || ''} · ${cs.line_count} lines · ${ago(cs.timestamp)}`;
+  } else {
+    lastCode = null;
+    document.getElementById('pn_code').textContent = '// No code snapshot received yet';
+    document.getElementById('pn_ln').textContent = '';
+    document.getElementById('pn_code_meta').textContent = '';
+  }
+
+  // Warnings
+  const w = document.getElementById('pn_warnings');
+  w.innerHTML = d.warnings && d.warnings.length
+    ? d.warnings.map(x => `<div class="bg-gray-950 border border-gray-800 rounded-lg px-3 py-2 text-gray-300"><span class="text-yellow-400">⚠</span> ${esc(x.message)} <span class="text-gray-600 text-xs ml-1">${esc(ago(x.created_at))}</span></div>`).join('')
+    : 'None.';
+}
+
+// ── label form ─────────────────────────────────────────────────
+async function submitLabel(ev) {
+  ev.preventDefault();
+  const picked = document.querySelector('input[name=lbl]:checked');
+  if (!picked) { toast('Choose Human, AI or Unsure first', 'err'); return; }
+  if (!panelSession) { toast('No session to label', 'err'); return; }
+  const btn = document.getElementById('lbl_submit');
+  btn.disabled = true;
+  try {
+    await post('/teacher/label', {
+      session_id: panelSession.session_id,
+      student_id: selectedId,
+      label: picked.value,
+      confidence: parseInt(document.getElementById('lbl_conf').value, 10),
+      notes: document.getElementById('lbl_notes').value,
+    });
+    toast(`Labelled ${selectedId} as ${picked.value}`, 'ok');
+    document.getElementById('label_form').reset();
+    document.getElementById('lbl_conf').value = '3';
+    loadSummary();
+  } catch (e) { toast(e.message, 'err'); }
+  btn.disabled = false;
+}
+
+// ── SECTION 3: quick actions ───────────────────────────────────
+async function warnStudent(id) {
+  const msg = await dialog({ title: `Warn ${id}`, message: 'This warning is stored and shown in the teacher view.',
+                             input: 'Please stay focused on the exam and avoid pasting code.', okText: 'Send Warning' });
+  if (!msg) return;
+  try {
+    await post(`/teacher/student/${encodeURIComponent(id)}/warn`, { message: msg });
+    toast('Warning recorded', 'ok');
+    if (id === selectedId) loadPanel();
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+async function disconnectStudent(id) {
+  const ok = await dialog({ title: `Force disconnect ${id}?`,
+    message: 'The student is marked disconnected now; their extension disconnects on its next heartbeat (within ~10s).',
+    okText: 'Disconnect', danger: true });
+  if (!ok) return;
+  try {
+    await post(`/teacher/student/${encodeURIComponent(id)}/disconnect`);
+    toast(`${id} disconnected`, 'ok');
+    refreshAll();
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+async function openReport(id) {
+  const modal = document.getElementById('report_modal'), body = document.getElementById('rp_body');
+  body.innerHTML = '<p class="text-gray-500">Loading…</p>';
+  document.getElementById('rp_name').textContent = id;
+  document.getElementById('rp_meta').textContent = '';
+  modal.classList.remove('hidden');
+  try {
+    const r = await api(`/teacher/student/${encodeURIComponent(id)}/report`);
+    document.getElementById('rp_name').textContent = r.student.full_name || id;
+    document.getElementById('rp_meta').textContent =
+      `${r.student.student_id} · ${r.student.email || ''} · ${r.session.is_connected ? 'Online' : 'Offline'} · suspicion ${r.session.suspicious_score} · ${r.snapshot_count} snapshots`;
+
+    const table = (head, rows, empty) => rows.length
+      ? `<div class="overflow-x-auto scrollbar-thin"><table class="w-full text-xs"><thead><tr class="text-gray-500 text-left">${head.map(h => `<th class="py-1 pr-4 font-medium">${h}</th>`).join('')}</tr></thead>
+         <tbody class="divide-y divide-gray-800">${rows.join('')}</tbody></table></div>`
+      : `<p class="text-gray-600">${empty}</p>`;
+    const td = v => `<td class="py-1.5 pr-4 text-gray-300">${v}</td>`;
+
+    body.innerHTML = `
+      <section><h3 class="text-white font-semibold mb-2">AI detection history</h3>${table(['When', 'Language', 'Prediction', 'AI score'],
+        r.submissions.filter(s => s.prediction).map(s => `<tr>${td(esc(fmt(s.timestamp)))}${td(esc(s.language))}${td(`<b class="${String(s.prediction).toUpperCase() === 'AI' ? 'text-red-400' : 'text-green-400'}">${esc(s.prediction)}</b>`)}${td(s.ai_probability != null ? (s.ai_probability * 100).toFixed(1) + '%' : '—')}</tr>`),
+        'No detection runs.')}</section>
+      <section><h3 class="text-white font-semibold mb-2">Teacher labels</h3>${table(['When', 'Teacher', 'Label', 'Conf.', 'Notes'],
+        r.labels.map(l => `<tr>${td(esc(fmt(l.created_at)))}${td(esc(l.teacher_id))}${td(`<b>${esc(l.label)}</b>`)}${td(l.confidence)}${td(esc(l.notes || ''))}</tr>`), 'No labels yet.')}</section>
+      <section><h3 class="text-white font-semibold mb-2">Warnings</h3>${table(['When', 'By', 'Message'],
+        r.warnings.map(w => `<tr>${td(esc(fmt(w.created_at)))}${td(esc(w.teacher_id))}${td(esc(w.message))}</tr>`), 'No warnings sent.')}</section>
+      <section><h3 class="text-white font-semibold mb-2">Recent events</h3>${table(['When', 'Event', 'Severity'],
+        r.events.map(e => `<tr>${td(esc(fmt(e.timestamp)))}${td(esc(String(e.event_type).replace(/_/g, ' ')))}${td(esc(e.severity))}</tr>`), 'No events recorded.')}</section>`;
+  } catch (e) {
+    body.innerHTML = `<p class="text-red-400">${esc(e.message)}</p>`;
+  }
+}
+function closeReport() { document.getElementById('report_modal').classList.add('hidden'); }
+
+// ── polling (10s) ──────────────────────────────────────────────
+let refreshing = false;
+async function refreshAll() {
+  if (refreshing) return;
+  refreshing = true;
+  const dot = document.getElementById('refresh_dot'), text = document.getElementById('refresh_text');
+  try {
+    await Promise.all([loadStudents(), loadSummary(), loadExam(), selectedId ? loadPanel() : null]);
+    dot.className = 'w-2 h-2 rounded-full bg-green-400';
+    text.textContent = 'Auto-refresh 10s · updated ' + new Date().toLocaleTimeString();
+  } catch (e) {
+    dot.className = 'w-2 h-2 rounded-full bg-red-400';
+    text.textContent = 'Refresh failed: ' + e.message;
+  }
+  refreshing = false;
+}
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') { closeReport(); if (document.getElementById('dlg').classList.contains('hidden')) closePanel(); }
+});
+
+refreshAll();
+setInterval(() => { if (!document.hidden) refreshAll(); }, POLL_MS);
+</script>
+</body>
+</html>

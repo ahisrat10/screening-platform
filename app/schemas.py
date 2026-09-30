@@ -136,6 +136,34 @@ class TeacherLabelRequest(BaseModel):
             raise ValueError('confidence must be between 1 and 5')
         return v
 
+class ProblemRequest(BaseModel):
+    title:       str
+    description: str
+    time_limit:  Optional[int] = None      # minutes
+
+    @field_validator('title', 'description')
+    def not_blank(cls, v):
+        v = v.strip()
+        if not v:
+            raise ValueError('must not be empty')
+        return v
+
+    @field_validator('time_limit')
+    def valid_limit(cls, v):
+        if v is not None and not 1 <= v <= 600:
+            raise ValueError('time_limit must be between 1 and 600 minutes')
+        return v
+
+class WarnRequest(BaseModel):
+    message: str = "Please follow the exam rules."
+
+    @field_validator('message')
+    def valid_message(cls, v):
+        v = v.strip()
+        if not v or len(v) > 500:
+            raise ValueError('message must be 1-500 characters')
+        return v
+
 class AssignStudentsRequest(BaseModel):
     teacher_id:  str
     student_ids: list[str]

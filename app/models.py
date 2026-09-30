@@ -61,6 +61,52 @@ class TeacherLabel(Base):
     created_at = Column(DateTime, server_default=func.now())
 
 
+class Problem(Base):
+    """A question the teacher posts for the exam (text only)."""
+    __tablename__ = "exam_problems"
+
+    id          = Column(Integer, primary_key=True, index=True)
+    title       = Column(String(200))
+    description = Column(String)
+    time_limit  = Column(Integer, nullable=True)      # minutes
+    created_by  = Column(String(50), ForeignKey("users.student_id"))
+    is_current  = Column(Boolean, default=True)
+    created_at  = Column(DateTime, server_default=func.now())
+
+
+class ExamState(Base):
+    """Single-row table (id=1): is an exam currently running?"""
+    __tablename__ = "exam_state"
+
+    id         = Column(Integer, primary_key=True)
+    is_active  = Column(Boolean, default=False)
+    started_at = Column(DateTime, nullable=True)
+    ended_at   = Column(DateTime, nullable=True)
+    started_by = Column(String(50), nullable=True)
+    problem_id = Column(Integer, nullable=True)
+
+
+class StudentWarning(Base):
+    __tablename__ = "student_warnings"
+
+    id         = Column(Integer, primary_key=True, index=True)
+    student_id = Column(String(50), ForeignKey("users.student_id"), index=True)
+    teacher_id = Column(String(50), ForeignKey("users.student_id"))
+    message    = Column(String)
+    created_at = Column(DateTime, server_default=func.now())
+
+
+class StudentControl(Base):
+    """Teacher -> extension signals, delivered in the heartbeat reply."""
+    __tablename__ = "student_controls"
+
+    id               = Column(Integer, primary_key=True, index=True)
+    student_id       = Column(String(50), ForeignKey("users.student_id"), unique=True, index=True)
+    force_disconnect = Column(Boolean, default=False)
+    set_by           = Column(String(50), nullable=True)
+    set_at           = Column(DateTime, nullable=True)
+
+
 class OTPCode(Base):
     __tablename__ = "otp_codes"
 

@@ -527,6 +527,22 @@ def heartbeat(
     if data.student_id != token_student_id:
         raise HTTPException(status_code=403, detail="Token mismatch")
 
+    # Teacher pressed "Force Disconnect": tell the extension (one-shot) and
+    # don't mark the student connected again.
+    control = db.query(models.StudentControl).filter(
+        models.StudentControl.student_id == data.student_id
+    ).first()
+    if control and control.force_disconnect:
+        control.force_disconnect = False
+        sess = db.query(models.StudentSession).filter(
+            models.StudentSession.student_id == data.student_id
+        ).first()
+        if sess:
+            sess.is_connected    = False
+            sess.disconnected_at = datetime.utcnow()
+        db.commit()
+        return {"status": "disconnected", "force_disconnect": True}
+
     hb = models.Heartbeat(
         student_id        = data.student_id,
         is_typing         = data.is_typing,
