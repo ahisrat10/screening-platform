@@ -1,13 +1,13 @@
 const vscode = require('vscode');
-const http   = require('http');
+const https  = require('https');
 
 // ══════════════════════════════════════════════════════════════
 // CODE MONITOR v4.0 — AUTOMATED TECHNICAL SCREENING PLATFORM
 // ══════════════════════════════════════════════════════════════
 
 const CONFIG = {
-    SERVER_HOST:               '127.0.0.1',
-    SERVER_PORT:               8000,
+    SERVER_HOST:               'screening-platform-production.up.railway.app',
+    SERVER_PORT:               443,
     SNAPSHOT_INTERVAL_MS:      30000,   // Send code every 30 seconds
     HEARTBEAT_INTERVAL_MS:     10000,   // Heartbeat every 10 seconds
     IDLE_TIMEOUT_MS:           60000,   // 60 seconds no typing = idle
@@ -727,7 +727,7 @@ function callLoginAPI(sid, password) {
             },
         };
 
-        const req = http.request(options, (res) => {
+        const req = https.request(options, (res) => {
             let data = '';
             res.on('data', chunk => data += chunk);
             res.on('end', () => {
@@ -1118,7 +1118,7 @@ function callAIDetectionAPI(payload) {
             headers:  headers,
         };
 
-        const req = http.request(options, (res) => {
+        const req = https.request(options, (res) => {
             let data = '';
             res.on('data', chunk => data += chunk);
             res.on('end', () => {
@@ -1128,14 +1128,19 @@ function callAIDetectionAPI(payload) {
                         resolve({ success: false, message: parsed.detail || 'AI detection failed' });
                         return;
                     }
-                    const aiProbability = Number(
-                        parsed.ai_probability ?? parsed.ai_score ?? parsed.probability ?? 0
-                    );
+                    const confidencePct = Number(
+                        parsed.confidence ?? parsed.ai_probability ?? parsed.ai_score ?? parsed.probability ?? 0
+                    ) * (parsed.confidence !== undefined ? 100 : 1);
+                    const isAI = parsed.prediction !== undefined
+                        ? String(parsed.prediction).toUpperCase() === 'AI'
+                        : (parsed.is_ai ?? confidencePct >= 50);
+                    const aiProbability    = isAI ? confidencePct : (100 - confidencePct);
+                    const humanProbability = isAI ? (100 - confidencePct) : confidencePct;
                     resolve({
                         success:           true,
-                        isAI:              parsed.is_ai ?? aiProbability >= 50,
+                        isAI:              isAI,
                         aiProbability:     aiProbability,
-                        humanProbability:  Number(parsed.human_probability ?? (100 - aiProbability)),
+                        humanProbability:  humanProbability,
                     });
                 } catch (e) {
                     resolve({ success: false, message: 'Invalid response from AI detection service' });
@@ -1319,7 +1324,7 @@ function sendToServer(endpoint, data) {
         headers:  headers,
     };
 
-    const req = http.request(options, (res) => {
+    const req = https.request(options, (res) => {
         if (!serverReachable) {
             serverReachable = true;
             updateStatusBar('connected');
