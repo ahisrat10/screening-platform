@@ -11,6 +11,7 @@ from starlette.requests import Request
 from .database import engine, get_db
 from . import models, schemas, auth
 from .teacher import router as teacher_router
+from .export import router as export_router
 from .email_service import generate_otp, save_otp, send_otp_email, send_welcome_email
 
 models.Base.metadata.create_all(bind=engine)
@@ -86,6 +87,7 @@ app.add_middleware(
 )
 
 app.include_router(teacher_router)
+app.include_router(export_router)
 
 logger = logging.getLogger("screening")
 
@@ -782,7 +784,8 @@ def analyze_ai_detection(
         ai_prediction      = result["prediction"],
         ai_confidence      = result["confidence"],
         ai_probability     = result["ai_probability"],
-        model_scores       = result["model_scores"],
+        # behavioral_risk is stored alongside the model scores for later export
+        model_scores       = {**result["model_scores"], "behavioral_risk": result.get("behavioral_risk")},
         code_features      = code_features,
         behavioral_data_id = behavioral_row.id,
     )

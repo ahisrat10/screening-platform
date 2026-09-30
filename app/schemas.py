@@ -267,6 +267,15 @@ class BehavioralSignals(BaseModel):
     copy_from_same_file_count:   int   = 0
     screen_freeze_events:        int   = 0
     sudden_skill_jump_count:     int   = 0
+    # Also sent by the extension; kept so they are stored in raw_events and
+    # can be exported (previously dropped because the schema ignored them).
+    keys_per_minute_series:      list  = []
+    typing_pause_avg_ms:         float = 0.0
+    code_deletion_chars_total:   int   = 0
+    time_per_line_ms:            float = 0.0
+    typing_speed_avg_cps:        float = 0.0
+    code_complexity_avg:         float = 0.0
+    code_fingerprint:            Optional[str] = None
 
     # Full 34-feature behavioral telemetry — persisted to behavioral_data,
     # not consumed by the fusion model directly.
