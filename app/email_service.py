@@ -1,5 +1,5 @@
 import smtplib
-import random
+import secrets
 import string
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -17,7 +17,7 @@ APP_NAME           = os.getenv("APP_NAME")
 
 # ── GENERATE OTP ───────────────────────────────────────────────
 def generate_otp() -> str:
-    return ''.join(random.choices(string.digits, k=6))
+    return ''.join(secrets.choice(string.digits) for _ in range(6))
 
 # ── SAVE OTP TO DATABASE ───────────────────────────────────────
 def save_otp(student_id: str, email: str, otp: str, db: Session):

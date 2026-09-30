@@ -196,7 +196,7 @@ document.getElementById('hint_id').textContent            = studentId || '';
 
 async function checkStatus() {
   try {
-    const res  = await fetch(`${API}/student/my-status?student_id=${studentId}`);
+    const res  = await fetch(`${API}/student/my-status?student_id=${studentId}`, { headers: { 'Authorization': `Bearer ${token}` } });
     const data = await res.json();
 
     document.getElementById('last_check').textContent = new Date().toLocaleTimeString();

@@ -414,7 +414,7 @@ function showOutput(data) {
 // ── LOAD SUBMISSIONS ───────────────────────────────────────────
 async function loadSubmissions() {
   try {
-    const res  = await fetch(`${API}/admin/submissions`);
+    const res  = await fetch(`${API}/admin/submissions`, { headers: { 'Authorization': `Bearer ${token}` } });
     const all  = await res.json();
 
     // Filter for this student
@@ -453,7 +453,7 @@ async function loadSubmissions() {
 async function checkExtension() {
   try {
     const res  = await fetch(
-      `${API}/student/my-status?student_id=${studentId}`
+      `${API}/student/my-status?student_id=${studentId}`, { headers: { 'Authorization': `Bearer ${token}` } }
     );
     const data = await res.json();
     const el   = document.getElementById('monitor_status');

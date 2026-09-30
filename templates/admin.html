@@ -226,7 +226,7 @@ let selectedId   = null;
 // ── WEBSOCKET ──────────────────────────────────────────────────
 function connectWS() {
   try {
-    ws = new WebSocket('ws://localhost:8000/ws/admin');
+    ws = new WebSocket('ws://localhost:8000/ws/admin?token=' + encodeURIComponent(token));
 
     ws.onopen = () => {
       const badge = document.getElementById('ws_badge');
@@ -343,7 +343,7 @@ function clearFeed() {
 // ── LOAD STUDENTS ──────────────────────────────────────────────
 async function loadStudents() {
   try {
-    const res   = await fetch(`${API}/admin/all-students`);
+    const res   = await fetch(`${API}/admin/all-students`, { headers: { 'Authorization': `Bearer ${token}` } });
     allStudents = await res.json();
     renderStudents();
     updateStats();
@@ -510,7 +510,7 @@ function modalTab(tab) {
 // ── LOAD EVENTS ────────────────────────────────────────────────
 async function loadEvents(studentId) {
   try {
-    const res    = await fetch(`${API}/admin/students/${studentId}/events`);
+    const res    = await fetch(`${API}/admin/students/${studentId}/events`, { headers: { 'Authorization': `Bearer ${token}` } });
     const events = await res.json();
     const list   = document.getElementById('m_events_list');
 
@@ -550,7 +550,7 @@ async function loadEvents(studentId) {
 // ── LOAD CODE ──────────────────────────────────────────────────
 async function loadCode(studentId) {
   try {
-    const res   = await fetch(`${API}/admin/students/${studentId}/code`);
+    const res   = await fetch(`${API}/admin/students/${studentId}/code`, { headers: { 'Authorization': `Bearer ${token}` } });
     const snaps = await res.json();
     const list  = document.getElementById('m_code_list');
 

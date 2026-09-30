@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends, HTTPException, WebSocket, WebSocketDisconnect, Header
+from fastapi import FastAPI, Depends, HTTPException, WebSocket, WebSocketDisconnect, Header, Query
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from datetime import datetime
@@ -130,7 +130,11 @@ def register(data: schemas.RegisterRequest, db: Session = Depends(get_db)):
 
 
 @app.post("/auth/register-admin", response_model=schemas.MessageResponse)
-def register_admin(data: schemas.AdminRegisterRequest, db: Session = Depends(get_db)):
+def register_admin(
+    data: schemas.AdminRegisterRequest,
+    db:   Session = Depends(get_db),
+    _guard = Depends(auth.get_admin_if_any_exist),
+):
     if db.query(models.User).filter(
         models.User.email == data.email
     ).first():
@@ -214,6 +218,26 @@ def login(data: schemas.LoginRequest, db: Session = Depends(get_db)):
     }
 
 
+# In-process limiter so a 6-digit OTP can't be brute-forced.
+_otp_failures: dict = {}
+_OTP_MAX_FAILS  = 5
+_OTP_WINDOW_SEC = 600
+
+
+def _otp_check_locked(student_id: str):
+    import time
+    now   = time.time()
+    fails = [t for t in _otp_failures.get(student_id, []) if now - t < _OTP_WINDOW_SEC]
+    _otp_failures[student_id] = fails
+    if len(fails) >= _OTP_MAX_FAILS:
+        raise HTTPException(status_code=429, detail="Too many invalid OTP attempts. Try again in 10 minutes.")
+
+
+def _otp_record_failure(student_id: str):
+    import time
+    _otp_failures.setdefault(student_id, []).append(time.time())
+
+
 @app.post("/auth/forgot-password", response_model=schemas.MessageResponse)
 def forgot_password(data: schemas.ForgotPasswordRequest, db: Session = Depends(get_db)):
     user = db.query(models.User).filter(
@@ -237,6 +261,7 @@ def forgot_password(data: schemas.ForgotPasswordRequest, db: Session = Depends(g
 
 @app.post("/auth/verify-otp", response_model=schemas.MessageResponse)
 def verify_otp(data: schemas.VerifyOTPRequest, db: Session = Depends(get_db)):
+    _otp_check_locked(data.student_id)
     record = db.query(models.OTPCode).filter(
         models.OTPCode.student_id == data.student_id,
         models.OTPCode.otp_code   == data.otp_code,
@@ -244,6 +269,7 @@ def verify_otp(data: schemas.VerifyOTPRequest, db: Session = Depends(get_db)):
     ).first()
 
     if not record:
+        _otp_record_failure(data.student_id)
         raise HTTPException(status_code=400, detail="Invalid OTP code")
     if record.expires_at < datetime.utcnow():
         raise HTTPException(status_code=400, detail="OTP expired. Request a new one.")
@@ -253,6 +279,7 @@ def verify_otp(data: schemas.VerifyOTPRequest, db: Session = Depends(get_db)):
 
 @app.post("/auth/reset-password", response_model=schemas.MessageResponse)
 def reset_password(data: schemas.ResetPasswordRequest, db: Session = Depends(get_db)):
+    _otp_check_locked(data.student_id)
     record = db.query(models.OTPCode).filter(
         models.OTPCode.student_id == data.student_id,
         models.OTPCode.otp_code   == data.otp_code,
@@ -260,11 +287,14 @@ def reset_password(data: schemas.ResetPasswordRequest, db: Session = Depends(get
     ).first()
 
     if not record or record.expires_at < datetime.utcnow():
+        _otp_record_failure(data.student_id)
         raise HTTPException(status_code=400, detail="Invalid or expired OTP")
 
     user = db.query(models.User).filter(
         models.User.student_id == data.student_id
     ).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Account not found")
     user.password_hash   = auth.hash_password(data.new_password)
     user.failed_attempts = 0
     user.locked_until    = None
@@ -287,7 +317,16 @@ def get_me(current_user = Depends(auth.get_current_user)):
 # WEBSOCKET ENDPOINT
 # ══════════════════════════════════════════════════════════════
 @app.websocket("/ws/admin")
-async def websocket_admin(websocket: WebSocket):
+async def websocket_admin(websocket: WebSocket, token: Optional[str] = Query(default=None)):
+    # Browsers can't set headers on WebSockets, so the admin JWT comes as ?token=
+    db = next(get_db())
+    try:
+        ok = auth.admin_from_token(token, db) is not None
+    finally:
+        db.close()
+    if not ok:
+        await websocket.close(code=1008)   # policy violation
+        return
     await manager.connect(websocket)
     try:
         while True:
@@ -530,7 +569,12 @@ def heartbeat(
 
 
 @app.get("/student/my-status")
-def my_status(student_id: str, db: Session = Depends(get_db)):
+def my_status(
+    student_id: str,
+    db: Session = Depends(get_db),
+    current_user = Depends(auth.get_current_user),
+):
+    auth.require_self_or_staff(current_user, student_id)
     session = db.query(models.StudentSession).filter(
         models.StudentSession.student_id == student_id
     ).first()
@@ -655,7 +699,9 @@ def analyze_ai_detection(
 ):
     from .ml.model_loader import predict_ai_detection
 
-    student_id      = data.student_id or token_student_id
+    if data.student_id and data.student_id != token_student_id:
+        raise HTTPException(status_code=403, detail="Token does not match Student ID")
+    student_id      = token_student_id
     behavioral_dict = data.behavioral.model_dump()
 
     result = predict_ai_detection(
@@ -721,7 +767,7 @@ def analyze_ai_detection(
 def submit_teacher_feedback(
     data:         schemas.TeacherFeedbackRequest,
     db:           Session = Depends(get_db),
-    current_user = Depends(auth.get_admin_user)
+    current_user = Depends(auth.get_teacher_user)
 ):
     import hashlib
 
@@ -777,8 +823,15 @@ def submit_teacher_feedback(
 @app.post("/code/execute")
 def execute_code_endpoint(
     data: schemas.CodeExecuteRequest,
-    db:   Session = Depends(get_db)
+    db:   Session = Depends(get_db),
+    current_user = Depends(auth.get_current_user),
 ):
+    # Students can only run/record code as themselves.
+    if auth.is_staff(current_user):
+        data.student_id = data.student_id or current_user.student_id
+    else:
+        data.student_id = current_user.student_id
+
     unavailable = {
         "success":        False,
         "output":         "",
@@ -837,13 +890,18 @@ def execute_code_endpoint(
 
 
 @app.get("/code/result/{submission_id}")
-def get_result(submission_id: int, db: Session = Depends(get_db)):
+def get_result(
+    submission_id: int,
+    db: Session = Depends(get_db),
+    current_user = Depends(auth.get_current_user),
+):
     sub = db.query(models.Submission).filter(
         models.Submission.id == submission_id
     ).first()
 
     if not sub:
         raise HTTPException(status_code=404, detail="Submission not found")
+    auth.require_self_or_staff(current_user, sub.student_id)
 
     return {
         "id":             sub.id,
@@ -859,10 +917,16 @@ def get_result(submission_id: int, db: Session = Depends(get_db)):
 
 
 @app.get("/admin/submissions")
-def get_all_submissions(db: Session = Depends(get_db)):
-    submissions = db.query(models.Submission).order_by(
-        models.Submission.timestamp.desc()
-    ).limit(100).all()
+def get_all_submissions(
+    db: Session = Depends(get_db),
+    current_user = Depends(auth.get_current_user),
+):
+    # Staff see everyone's submissions; students only their own
+    # (the exam page uses this endpoint for the student's history).
+    q = db.query(models.Submission)
+    if not auth.is_staff(current_user):
+        q = q.filter(models.Submission.student_id == current_user.student_id)
+    submissions = q.order_by(models.Submission.timestamp.desc()).limit(100).all()
 
     return [{
         "id":             s.id,
@@ -880,7 +944,7 @@ def get_all_submissions(db: Session = Depends(get_db)):
 # ══════════════════════════════════════════════════════════════
 
 @app.get("/admin/dashboard")
-def dashboard(db: Session = Depends(get_db)):
+def dashboard(db: Session = Depends(get_db), admin = Depends(auth.get_admin_user)):
     total_students  = db.query(models.User).filter(models.User.role == "student").count()
     connected_now   = db.query(models.StudentSession).filter(models.StudentSession.is_connected == True).count()
     total_events    = db.query(models.StudentEvent).count()
@@ -897,7 +961,7 @@ def dashboard(db: Session = Depends(get_db)):
 
 
 @app.get("/admin/all-students")
-def get_all_students(db: Session = Depends(get_db)):
+def get_all_students(db: Session = Depends(get_db), admin = Depends(auth.get_admin_user)):
     students = db.query(models.User).filter(models.User.role == "student").all()
     result   = []
 
@@ -952,7 +1016,7 @@ def get_all_students(db: Session = Depends(get_db)):
 
 
 @app.get("/admin/students/{student_id}/events")
-def get_events(student_id: str, db: Session = Depends(get_db)):
+def get_events(student_id: str, db: Session = Depends(get_db), admin = Depends(auth.get_admin_user)):
     events = db.query(models.StudentEvent).filter(
         models.StudentEvent.student_id == student_id
     ).order_by(models.StudentEvent.timestamp.desc()).all()
@@ -966,7 +1030,7 @@ def get_events(student_id: str, db: Session = Depends(get_db)):
 
 
 @app.get("/admin/students/{student_id}/code")
-def get_code(student_id: str, db: Session = Depends(get_db)):
+def get_code(student_id: str, db: Session = Depends(get_db), admin = Depends(auth.get_admin_user)):
     snapshots = db.query(models.CodeSnapshot).filter(
         models.CodeSnapshot.student_id == student_id
     ).order_by(models.CodeSnapshot.timestamp.desc()).all()
@@ -1046,7 +1110,7 @@ def export_dataset(
 
 
 @app.get("/admin/flagged")
-def get_flagged(db: Session = Depends(get_db)):
+def get_flagged(db: Session = Depends(get_db), admin = Depends(auth.get_admin_user)):
     flagged = db.query(models.StudentSession).filter(
         models.StudentSession.suspicious_score >= 50
     ).order_by(models.StudentSession.suspicious_score.desc()).all()

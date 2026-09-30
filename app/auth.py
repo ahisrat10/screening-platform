@@ -13,11 +13,15 @@ import os
 load_dotenv()
 
 SECRET_KEY  = os.getenv("SECRET_KEY")
+if not SECRET_KEY:
+    # Without this every login would fail later with an opaque 500.
+    raise RuntimeError("SECRET_KEY environment variable is not set")
 ALGORITHM   = os.getenv("ALGORITHM", "HS256")
 EXPIRE_MINS = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", 1440))
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 security    = HTTPBearer()
+optional_security = HTTPBearer(auto_error=False)
 
 # ── PASSWORD ───────────────────────────────────────────────────
 def hash_password(password: str) -> str:
@@ -83,3 +87,45 @@ def get_teacher_user(current_user = Depends(get_current_user)):
             detail="Teacher access required"
         )
     return current_user
+
+
+def is_staff(user) -> bool:
+    return user.role in ("teacher", "admin")
+
+
+def require_self_or_staff(user, student_id: str):
+    """Students may only touch their own data; teachers/admins any."""
+    if user.student_id != student_id and not is_staff(user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You can only access your own data"
+        )
+
+
+def admin_from_token(token: Optional[str], db: Session):
+    """Return the active admin user for a raw JWT, or None (used by the
+    WebSocket, which cannot send an Authorization header from a browser)."""
+    payload = decode_token(token) if token else None
+    if not payload:
+        return None
+    user = db.query(models.User).filter(
+        models.User.student_id == payload.get("sub")
+    ).first()
+    return user if user and user.is_active and user.role == "admin" else None
+
+
+def get_admin_if_any_exist(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(optional_security),
+    db: Session = Depends(get_db),
+):
+    """Bootstrap guard for admin registration: the very first admin may be
+    created without a token; after that an admin token is required."""
+    if not db.query(models.User).filter(models.User.role == "admin").first():
+        return None
+    user = admin_from_token(credentials.credentials if credentials else None, db)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin access required to create another admin"
+        )
+    return user
