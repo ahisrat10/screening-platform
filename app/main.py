@@ -1133,7 +1133,40 @@ def get_flagged(db: Session = Depends(get_db), admin = Depends(auth.get_admin_us
 # HOME
 # ══════════════════════════════════════════════════════════════
 
-@app.get("/")
+# ══════════════════════════════════════════════════════════════
+# WEB PAGES (templates/)
+# ══════════════════════════════════════════════════════════════
+from pathlib import Path
+from fastapi.responses import HTMLResponse
+
+TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
+
+PAGES = {
+    "/":               "login.html",
+    "/register":       "register.html",
+    "/dashboard":      "dashboard.html",
+    "/admin":          "admin.html",
+    "/admin/register": "admin_register.html",
+    "/forgot":         "forgot.html",
+    "/exam":           "exam.html",
+}
+
+
+def _make_page(filename: str):
+    def page():
+        path = TEMPLATES_DIR / filename
+        if not path.is_file():
+            raise HTTPException(status_code=404, detail=f"Page not found: {filename}")
+        return HTMLResponse(path.read_text(encoding="utf-8"))
+    return page
+
+
+for _route, _file in PAGES.items():
+    app.add_api_route(_route, _make_page(_file), methods=["GET"],
+                      response_class=HTMLResponse, include_in_schema=False)
+
+
+@app.get("/health")
 def home():
     return {
         "message": "Automated Technical Screening Platform API v3.1",

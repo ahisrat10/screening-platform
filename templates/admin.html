@@ -213,7 +213,7 @@ const adminName = localStorage.getItem('full_name');
 const role      = localStorage.getItem('role');
 
 if (!token || role !== 'admin') {
-  window.location.href = 'login.html';
+  window.location.href = '/';
 }
 
 document.getElementById('admin_name').textContent = adminName || 'Admin';
@@ -595,7 +595,7 @@ async function loadCode(studentId) {
 function logout() {
   if (ws) ws.close();
   localStorage.clear();
-  window.location.href = 'login.html';
+  window.location.href = '/';
 }
 
 // ── INIT ───────────────────────────────────────────────────────

@@ -37,7 +37,7 @@
       </div>
 
       <div class="text-right">
-        <a href="forgot.html" class="text-blue-400 text-sm hover:underline">
+        <a href="/forgot" class="text-blue-400 text-sm hover:underline">
           Forgot password?
         </a>
       </div>
@@ -52,7 +52,7 @@
 
     <p class="text-center text-gray-500 text-sm mt-6">
       Don't have an account?
-      <a href="register.html" class="text-blue-400 hover:underline">Register here</a>
+      <a href="/register" class="text-blue-400 hover:underline">Register here</a>
     </p>
 
   </div>
@@ -91,9 +91,9 @@ async function login() {
 
       setTimeout(() => {
         if (data.role === 'admin') {
-          window.location.href = 'admin.html';
+          window.location.href = '/admin';
         } else {
-          window.location.href = 'dashboard.html';
+          window.location.href = '/dashboard';
         }
       }, 1500);
 

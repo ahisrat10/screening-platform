@@ -20,7 +20,7 @@
         <p id="student_name" class="text-white font-medium text-sm"></p>
         <p id="student_id_display" class="text-gray-500 text-xs font-mono"></p>
       </div>
-      <button onclick="window.location.href='exam.html'"
+      <button onclick="window.location.href='/exam'"
         class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2
                rounded-lg text-sm font-medium transition">
         💻 Start Exam
@@ -185,7 +185,7 @@ const token     = localStorage.getItem('token');
 const studentId = localStorage.getItem('student_id');
 const fullName  = localStorage.getItem('full_name');
 
-if (!token) window.location.href = 'login.html';
+if (!token) window.location.href = '/';
 
 // Fill info
 document.getElementById('student_name').textContent       = fullName || '';
@@ -262,7 +262,7 @@ async function checkStatus() {
 
 function logout() {
   localStorage.clear();
-  window.location.href = 'login.html';
+  window.location.href = '/';
 }
 
 checkStatus();

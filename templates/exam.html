@@ -197,7 +197,7 @@ const token     = localStorage.getItem('token');
 const studentId = localStorage.getItem('student_id');
 const fullName  = localStorage.getItem('full_name');
 
-if (!token) window.location.href = 'login.html';
+if (!token) window.location.href = '/';
 
 document.getElementById('student_name').textContent = fullName || '';
 
@@ -479,7 +479,7 @@ function escapeHtml(text) {
 }
 
 function goBack() {
-  window.location.href = 'dashboard.html';
+  window.location.href = '/dashboard';
 }
 
 // ── INIT ───────────────────────────────────────────────────────

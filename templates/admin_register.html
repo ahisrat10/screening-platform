@@ -92,7 +92,7 @@
 
     <p class="text-center text-gray-500 text-sm mt-6">
       Already have an account?
-      <a href="login.html" class="text-blue-400 hover:underline">Login here</a>
+      <a href="/" class="text-blue-400 hover:underline">Login here</a>
     </p>
 
   </div>
@@ -136,7 +136,7 @@ async function createAdmin() {
 
     if (res.ok) {
       showMessage('✅ Admin account created! Redirecting to login...', 'success');
-      setTimeout(() => window.location.href = 'login.html', 2000);
+      setTimeout(() => window.location.href = '/', 2000);
     } else {
       showMessage('❌ ' + (data.detail || 'Failed to create account'), 'error');
     }
