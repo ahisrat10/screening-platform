@@ -4,7 +4,9 @@ from sqlalchemy.orm import Session
 from datetime import datetime
 from typing import List, Optional
 from contextlib import asynccontextmanager
-import json, asyncio
+import json, asyncio, logging
+from fastapi.responses import JSONResponse
+from starlette.requests import Request
 
 from .database import engine, get_db
 from . import models, schemas, auth
@@ -73,7 +75,11 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins     = ["*"],
+    allow_origins     = [
+        "https://screening-platform-production.up.railway.app",
+        "http://localhost:8000",
+        "http://127.0.0.1:8000",
+    ],
     allow_credentials = True,
     allow_methods     = ["*"],
     allow_headers     = ["*"],
@@ -81,11 +87,22 @@ app.add_middleware(
 
 app.include_router(teacher_router)
 
+logger = logging.getLogger("screening")
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    """Any uncaught error -> JSON instead of plain-text "Internal Server Error".
+    HTTPException / validation errors keep their own handlers."""
+    logger.exception("Unhandled error on %s %s", request.method, request.url.path)
+    return JSONResponse(status_code=500, content={"detail": "Internal server error"})
+
 # ══════════════════════════════════════════════════════════════
 # JWT VERIFICATION FOR EXTENSION ROUTES
 # ══════════════════════════════════════════════════════════════
 def get_student_from_token(
-    authorization: Optional[str] = Header(default=None)
+    authorization: Optional[str] = Header(default=None),
+    db: Session = Depends(get_db),
 ) -> str:
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(
@@ -99,7 +116,17 @@ def get_student_from_token(
             status_code=401,
             detail="Token expired or invalid. Please login again."
         )
-    return payload.get("sub")
+
+    # A valid signature isn't enough: the account must still exist and be active.
+    user = db.query(models.User).filter(
+        models.User.student_id == payload.get("sub")
+    ).first()
+    if not user or not user.is_active:
+        raise HTTPException(
+            status_code=401,
+            detail="Account not found or deactivated. Please login again."
+        )
+    return user.student_id
 
 # ══════════════════════════════════════════════════════════════
 # AUTH ROUTES
@@ -219,6 +246,9 @@ def login(data: schemas.LoginRequest, db: Session = Depends(get_db)):
 
 
 # In-process limiter so a 6-digit OTP can't be brute-forced.
+# LIMITATION: state lives in this process's memory, so it resets on restart and
+# is not shared between workers. That is fine while we run a single Railway
+# worker; move it to a shared store (e.g. Redis) before scaling out.
 _otp_failures: dict = {}
 _OTP_MAX_FAILS  = 5
 _OTP_WINDOW_SEC = 600
@@ -245,18 +275,19 @@ def forgot_password(data: schemas.ForgotPasswordRequest, db: Session = Depends(g
         models.User.email      == data.email
     ).first()
 
+    # Same response whether or not the account exists (no account enumeration),
+    # including when the email fails to send.
+    generic = {"message": "If this account exists, a reset code has been sent", "success": True}
+
     if not user:
-        raise HTTPException(status_code=404, detail="No account found with this Student ID and email")
+        return generic
 
-    otp  = generate_otp()
+    otp = generate_otp()
     save_otp(data.student_id, data.email, otp, db)
-    sent = send_otp_email(data.email, data.student_id, otp)
+    if not send_otp_email(data.email, data.student_id, otp):
+        logger.error("Failed to send OTP email for %s", data.student_id)
 
-    if not sent:
-        raise HTTPException(status_code=500, detail="Failed to send OTP email. Please try again.")
-
-    masked = f"{data.email[:3]}***{data.email[data.email.index('@'):]}"
-    return {"message": f"OTP sent to {masked}", "success": True}
+    return generic
 
 
 @app.post("/auth/verify-otp", response_model=schemas.MessageResponse)
