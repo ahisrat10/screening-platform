@@ -130,17 +130,24 @@ def register(data: schemas.RegisterRequest, db: Session = Depends(get_db)):
 
 
 @app.post("/auth/register-admin", response_model=schemas.MessageResponse)
-def register_admin(data: schemas.RegisterRequest, db: Session = Depends(get_db)):
-    if db.query(models.User).filter(
-        models.User.student_id == data.student_id
-    ).first():
-        raise HTTPException(status_code=400, detail="This ID is already registered")
+def register_admin(data: schemas.AdminRegisterRequest, db: Session = Depends(get_db)):
     if db.query(models.User).filter(
         models.User.email == data.email
     ).first():
         raise HTTPException(status_code=400, detail="Email already registered")
+
+    # No student ID for admins: generate a unique login ID from the email.
+    # (users.student_id is the login key / JWT subject everywhere else.)
+    import re
+    base     = "admin-" + (re.sub(r"[^a-z0-9]+", "-", data.email.split("@")[0].lower()).strip("-") or "user")
+    admin_id = base
+    n = 1
+    while db.query(models.User).filter(models.User.student_id == admin_id).first():
+        n += 1
+        admin_id = f"{base}-{n}"
+
     admin = models.User(
-        student_id    = data.student_id,
+        student_id    = admin_id,
         email         = data.email,
         full_name     = data.full_name,
         password_hash = auth.hash_password(data.password),
@@ -149,7 +156,10 @@ def register_admin(data: schemas.RegisterRequest, db: Session = Depends(get_db))
     )
     db.add(admin)
     db.commit()
-    return {"message": f"Admin account created for {data.full_name}!", "success": True}
+    return {
+        "message": f"Admin account created for {data.full_name}! Log in with your email or ID: {admin_id}",
+        "success": True,
+    }
 
 
 @app.post("/auth/login", response_model=schemas.TokenResponse)
@@ -157,6 +167,11 @@ def login(data: schemas.LoginRequest, db: Session = Depends(get_db)):
     user = db.query(models.User).filter(
         models.User.student_id == data.student_id
     ).first()
+    # Admins have no student ID, so allow logging in with the account email.
+    if not user and "@" in data.student_id:
+        user = db.query(models.User).filter(
+            models.User.email == data.student_id.strip()
+        ).first()
 
     if not user:
         raise HTTPException(status_code=401, detail="Invalid Student ID or password")

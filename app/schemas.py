@@ -37,6 +37,29 @@ class RegisterRequest(BaseModel):
             raise ValueError('Passwords do not match')
         return v
 
+class AdminRegisterRequest(BaseModel):
+    """Admins have no university student ID; one is generated server-side."""
+    email:            EmailStr
+    full_name:        str
+    password:         str
+    confirm_password: str
+
+    @field_validator('password')
+    def validate_password(cls, v):
+        if len(v) < 8:
+            raise ValueError('Password must be at least 8 characters')
+        if not re.search(r'[A-Z]', v):
+            raise ValueError('Password must contain at least one uppercase letter')
+        if not re.search(r'[0-9]', v):
+            raise ValueError('Password must contain at least one number')
+        return v
+
+    @field_validator('confirm_password')
+    def passwords_match(cls, v, info):
+        if 'password' in info.data and v != info.data['password']:
+            raise ValueError('Passwords do not match')
+        return v
+
 class LoginRequest(BaseModel):
     student_id: str
     password:   str
