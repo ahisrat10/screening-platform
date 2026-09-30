@@ -1381,9 +1381,58 @@ function getSessionDuration() {
     return `${minutes}m ${seconds}s`;
 }
 
+// POST JSON and resolve when the request finishes, fails or times out.
+// Unlike sendToServer (fire-and-forget), this lets deactivate() keep the
+// extension host alive until the request has actually gone out.
+function postAndWait(endpoint, data, timeoutMs) {
+    return new Promise((resolve) => {
+        const jsonData = JSON.stringify(data);
+        const headers  = {
+            'Content-Type':   'application/json',
+            'Content-Length': Buffer.byteLength(jsonData),
+        };
+        if (jwtToken) headers['Authorization'] = `Bearer ${jwtToken}`;
+
+        let settled = false;
+        const done = () => { if (!settled) { settled = true; resolve(); } };
+
+        const req = https.request({
+            hostname: CONFIG.SERVER_HOST,
+            port:     CONFIG.SERVER_PORT,
+            path:     endpoint,
+            method:   'POST',
+            headers:  headers,
+        }, (res) => {
+            res.on('data', () => {});
+            res.on('end', done);
+            res.on('error', done);
+        });
+        req.on('error', done);
+        req.setTimeout(timeoutMs, () => { req.destroy(); done(); });
+        req.write(jsonData);
+        req.end();
+    });
+}
+
+// Called when VS Code closes or the extension is disabled/reloaded. Returning
+// the promise makes VS Code wait (up to its shutdown limit) for the
+// disconnect so the server records the session end even if the student
+// never pressed Logout.
 function deactivate() {
+    const wasConnected = isConnected && studentId && jwtToken;
+    const payload = wasConnected
+        ? { student_id: studentId, timestamp: new Date().toISOString() }
+        : null;
+
+    // Stop heartbeats first: a late heartbeat would mark the student connected again.
     stopMonitoring();
     if (statusBarItem) statusBarItem.dispose();
+
+    if (!payload) return undefined;
+
+    const pending = postAndWait('/student/disconnect', payload, 3000);
+    isConnected = false;
+    return pending;
 }
 
 module.exports = { activate, deactivate };
