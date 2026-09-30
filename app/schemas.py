@@ -91,6 +91,32 @@ class MessageResponse(BaseModel):
     message: str
     success: bool = True
 
+# ── TEACHER SCHEMAS ────────────────────────────────────────────
+
+class TeacherLabelRequest(BaseModel):
+    session_id: int
+    student_id: str
+    label:      str
+    confidence: int
+    notes:      str = ""
+
+    @field_validator('label')
+    def validate_label(cls, v):
+        v = v.strip().lower()
+        if v not in ("human", "ai", "unsure"):
+            raise ValueError('label must be "human", "ai" or "unsure"')
+        return v
+
+    @field_validator('confidence')
+    def validate_confidence(cls, v):
+        if not 1 <= v <= 5:
+            raise ValueError('confidence must be between 1 and 5')
+        return v
+
+class AssignStudentsRequest(BaseModel):
+    teacher_id:  str
+    student_ids: list[str]
+
 # ── EXTENSION SCHEMAS ──────────────────────────────────────────
 
 class ConnectData(BaseModel):

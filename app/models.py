@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, Float, ForeignKey
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, Float, ForeignKey, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.sql import func
 from .database import Base
@@ -31,6 +31,35 @@ class User(Base):
     locked_until    = Column(DateTime, nullable=True)
     created_at      = Column(DateTime, server_default=func.now())
     updated_at      = Column(DateTime, onupdate=func.now())
+
+# User.role is a plain string: "student" | "teacher" | "admin".
+# (No column change needed, so existing databases keep working.)
+
+class TeacherAssignment(Base):
+    """Which students a teacher is responsible for. A teacher with no rows
+    here can see all students."""
+    __tablename__ = "teacher_assignments"
+    __table_args__ = (UniqueConstraint("teacher_id", "student_id", name="uq_teacher_student"),)
+
+    id         = Column(Integer, primary_key=True, index=True)
+    teacher_id = Column(String(50), ForeignKey("users.student_id"), index=True)
+    student_id = Column(String(50), ForeignKey("users.student_id"), index=True)
+    created_at = Column(DateTime, server_default=func.now())
+
+
+class TeacherLabel(Base):
+    __tablename__ = "teacher_labels"
+
+    id         = Column(Integer, primary_key=True, index=True)
+    # StudentSession.id (the live monitoring session row)
+    session_id = Column(Integer, ForeignKey("student_sessions.id"), index=True)
+    student_id = Column(String(50), ForeignKey("users.student_id"), index=True)
+    teacher_id = Column(String(50), ForeignKey("users.student_id"), index=True)
+    label      = Column(String(10))        # human | ai | unsure
+    confidence = Column(Integer)           # 1-5
+    notes      = Column(String, nullable=True)
+    created_at = Column(DateTime, server_default=func.now())
+
 
 class OTPCode(Base):
     __tablename__ = "otp_codes"

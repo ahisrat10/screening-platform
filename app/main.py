@@ -8,6 +8,7 @@ import json, asyncio
 
 from .database import engine, get_db
 from . import models, schemas, auth
+from .teacher import router as teacher_router
 from .email_service import generate_otp, save_otp, send_otp_email, send_welcome_email
 
 models.Base.metadata.create_all(bind=engine)
@@ -77,6 +78,8 @@ app.add_middleware(
     allow_methods     = ["*"],
     allow_headers     = ["*"],
 )
+
+app.include_router(teacher_router)
 
 # ══════════════════════════════════════════════════════════════
 # JWT VERIFICATION FOR EXTENSION ROUTES
