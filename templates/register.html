@@ -123,11 +123,26 @@ async function register() {
       showMessage('✅ ' + data.message + ' Redirecting to login...', 'success');
       setTimeout(() => window.location.href = '/', 2000);
     } else {
-      showMessage('❌ ' + (data.detail || 'Registration failed'), 'error');
+      showMessage('❌ ' + errorMessage(data, 'Registration failed'), 'error');
     }
   } catch (err) {
     showMessage('❌ Cannot connect to server. Make sure backend is running!', 'error');
   }
+}
+
+// FastAPI sends `detail` as a string for HTTP errors but as an ARRAY of
+// objects ({loc, msg, ...}) for validation errors, which used to render as
+// "[object Object]". Always produce readable text.
+function errorMessage(error, fallback) {
+  const d = error && error.detail;
+  if (typeof d === 'string' && d) return d;
+  if (Array.isArray(d) && d.length) {
+    return d.map(e => (e && e.msg) ? String(e.msg).replace(/^Value error, /, '') : JSON.stringify(e)).join('; ');
+  }
+  if (d && typeof d === 'object') return d.msg || d.message || JSON.stringify(d);
+  if (error && error.message) return error.message;
+  if (error && Object.keys(error).length) return JSON.stringify(error);
+  return fallback;
 }
 
 function showMessage(msg, type) {
