@@ -1177,7 +1177,7 @@ function showAIDetectionResult(result) {
 }
 
 // ══════════════════════════════════════════════════════════════
-// HEARTBEAT — every 10 seconds
+// HEARTBEAT — every 30 seconds
 // ══════════════════════════════════════════════════════════════
 function sendHeartbeat() {
     const editor      = vscode.window.activeTextEditor;
