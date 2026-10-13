@@ -5,94 +5,129 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Register — Screening Platform</title>
 <script src="https://cdn.tailwindcss.com"></script>
+<style>
+  .seg-btn { transition: background-color .15s, color .15s, box-shadow .15s; }
+  .seg-btn[aria-pressed="true"] { background: #2563eb; color: #fff; box-shadow: 0 1px 8px rgba(37,99,235,.45); }
+  .seg-btn[aria-pressed="false"] { color: #9ca3af; }
+  .seg-btn[aria-pressed="false"]:hover { color: #fff; }
+</style>
 </head>
 <body class="bg-gray-950 min-h-screen flex items-center justify-center p-4">
-<div class="w-full max-w-md">
+<div class="w-full max-w-md py-6">
 
-  <!-- Header -->
-  <div class="text-center mb-8">
-    <h1 class="text-3xl font-bold text-white">🎓 Create Account</h1>
-    <p class="text-gray-400 mt-2">Automated Technical Screening Platform</p>
+  <div class="text-center mb-7">
+    <div class="mx-auto w-14 h-14 rounded-2xl bg-blue-600/15 border border-blue-500/30 flex items-center justify-center text-2xl mb-4">🎓</div>
+    <h1 id="title" class="text-2xl font-bold text-white">Create student account</h1>
+    <p class="text-gray-400 text-sm mt-1">Automated Technical Screening Platform</p>
   </div>
 
-  <!-- Card -->
-  <div class="bg-gray-900 rounded-2xl p-8 shadow-2xl border border-gray-800">
+  <div class="bg-gray-900 rounded-2xl p-7 shadow-2xl border border-gray-800">
 
-    <!-- Error/Success Message -->
-    <div id="message" class="hidden mb-4 p-4 rounded-lg text-sm font-medium"></div>
+    <!-- Student / Teacher toggle -->
+    <div class="grid grid-cols-2 gap-1 p-1 bg-gray-950 rounded-xl border border-gray-800 mb-6" role="group" aria-label="Account type">
+      <button type="button" id="seg_student" class="seg-btn py-2 rounded-lg text-sm font-semibold" aria-pressed="true"  onclick="setRole('student')">🎓 Student</button>
+      <button type="button" id="seg_teacher" class="seg-btn py-2 rounded-lg text-sm font-semibold" aria-pressed="false" onclick="setRole('teacher')">👩‍🏫 Teacher</button>
+    </div>
 
-    <!-- Form -->
-    <div class="space-y-4">
+    <div id="teacher_note" class="hidden mb-4 p-3 rounded-lg text-xs bg-yellow-900/40 border border-yellow-800 text-yellow-200">
+      Teacher accounts can view students' code and activity, so an administrator must approve yours
+      before you can sign in.
+    </div>
 
-      <div>
-        <label class="text-gray-300 text-sm font-medium block mb-1">
-          Student ID
-        </label>
-        <input id="student_id" type="text"
-          placeholder="e.g. 2023-2-60-148"
-          class="w-full bg-gray-800 text-white border border-gray-700
-                 rounded-lg px-4 py-3 focus:outline-none focus:border-blue-500"/>
+    <div id="message" class="hidden mb-4 p-3 rounded-lg text-sm font-medium" role="alert"></div>
+
+    <form id="reg_form" class="space-y-4" novalidate>
+
+      <div id="sid_wrap">
+        <label for="student_id" class="text-gray-300 text-sm font-medium block mb-1">Student ID</label>
+        <input id="student_id" type="text" placeholder="e.g. 2023-2-60-148" autocomplete="username"
+          class="w-full bg-gray-800 text-white border border-gray-700 rounded-lg px-4 py-3
+                 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"/>
         <p class="text-gray-500 text-xs mt-1">Format: YYYY-S-DD-RRR</p>
       </div>
 
       <div>
-        <label class="text-gray-300 text-sm font-medium block mb-1">
-          Full Name
-        </label>
-        <input id="full_name" type="text"
-          placeholder="Your full name"
-          class="w-full bg-gray-800 text-white border border-gray-700
-                 rounded-lg px-4 py-3 focus:outline-none focus:border-blue-500"/>
+        <label for="full_name" class="text-gray-300 text-sm font-medium block mb-1">Full name</label>
+        <input id="full_name" type="text" placeholder="Your full name" autocomplete="name"
+          class="w-full bg-gray-800 text-white border border-gray-700 rounded-lg px-4 py-3
+                 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"/>
       </div>
 
       <div>
-        <label class="text-gray-300 text-sm font-medium block mb-1">
-          Email Address
-        </label>
-        <input id="email" type="email"
-          placeholder="your@email.com"
-          class="w-full bg-gray-800 text-white border border-gray-700
-                 rounded-lg px-4 py-3 focus:outline-none focus:border-blue-500"/>
+        <label for="email" class="text-gray-300 text-sm font-medium block mb-1">Email address</label>
+        <input id="email" type="email" placeholder="your@email.com" autocomplete="email"
+          class="w-full bg-gray-800 text-white border border-gray-700 rounded-lg px-4 py-3
+                 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"/>
       </div>
 
       <div>
-        <label class="text-gray-300 text-sm font-medium block mb-1">
-          Password
-        </label>
-        <input id="password" type="password"
-          placeholder="Min 8 chars, 1 uppercase, 1 number"
-          class="w-full bg-gray-800 text-white border border-gray-700
-                 rounded-lg px-4 py-3 focus:outline-none focus:border-blue-500"/>
+        <label for="password" class="text-gray-300 text-sm font-medium block mb-1">Password</label>
+        <div class="relative">
+          <input id="password" type="password" placeholder="Min 8 chars, 1 uppercase, 1 number" autocomplete="new-password"
+            class="w-full bg-gray-800 text-white border border-gray-700 rounded-lg pl-4 pr-12 py-3
+                   focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"/>
+          <button type="button" data-eye="password" aria-label="Show password" aria-pressed="false"
+            class="eye absolute inset-y-0 right-0 px-3 flex items-center text-gray-400 hover:text-white"></button>
+        </div>
       </div>
 
       <div>
-        <label class="text-gray-300 text-sm font-medium block mb-1">
-          Confirm Password
-        </label>
-        <input id="confirm_password" type="password"
-          placeholder="Repeat your password"
-          class="w-full bg-gray-800 text-white border border-gray-700
-                 rounded-lg px-4 py-3 focus:outline-none focus:border-blue-500"/>
+        <label for="confirm_password" class="text-gray-300 text-sm font-medium block mb-1">Confirm password</label>
+        <div class="relative">
+          <input id="confirm_password" type="password" placeholder="Repeat your password" autocomplete="new-password"
+            class="w-full bg-gray-800 text-white border border-gray-700 rounded-lg pl-4 pr-12 py-3
+                   focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"/>
+          <button type="button" data-eye="confirm_password" aria-label="Show password" aria-pressed="false"
+            class="eye absolute inset-y-0 right-0 px-3 flex items-center text-gray-400 hover:text-white"></button>
+        </div>
       </div>
 
-      <button onclick="register()"
-        class="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold
+      <button id="submit_btn" type="submit"
+        class="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white font-semibold
                py-3 rounded-lg transition duration-200 mt-2">
-        Create Account
+        Create account
       </button>
-
-    </div>
+    </form>
 
     <p class="text-center text-gray-500 text-sm mt-6">
       Already have an account?
-      <a href="/" class="text-blue-400 hover:underline">Login here</a>
+      <a href="/" class="text-blue-400 hover:underline">Sign in here</a>
     </p>
-
   </div>
 </div>
 
 <script>
 const API = 'https://screening-platform-production.up.railway.app';
+let role = 'student';
+
+const EYE_ON  = '<svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M2.04 12.32a1 1 0 0 1 0-.64C3.42 7.5 7.36 4.5 12 4.5s8.58 3 9.96 7.18a1 1 0 0 1 0 .64C20.58 16.5 16.64 19.5 12 19.5s-8.58-3-9.96-7.18Z"/><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"/></svg>';
+const EYE_OFF = '<svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M3.98 8.22A10.5 10.5 0 0 0 2.04 12c1.38 4.18 5.32 7.5 9.96 7.5 1.7 0 3.3-.44 4.7-1.22M6.23 6.23A10.45 10.45 0 0 1 12 4.5c4.64 0 8.58 3.32 9.96 7.5a10.5 10.5 0 0 1-4.29 5.23M6.23 6.23 3 3m3.23 3.23 3.65 3.65m7.89 7.89L21 21m-3.23-3.23-3.65-3.65m0 0a3 3 0 1 0-4.24-4.24m4.24 4.24L9.88 9.88"/></svg>';
+
+// ── show / hide password (both fields) ─────────────────────────
+document.querySelectorAll('.eye').forEach(btn => {
+  btn.innerHTML = EYE_ON;
+  btn.addEventListener('click', () => {
+    const input = document.getElementById(btn.dataset.eye);
+    const show = input.type === 'password';
+    input.type = show ? 'text' : 'password';
+    btn.innerHTML = show ? EYE_OFF : EYE_ON;
+    btn.setAttribute('aria-label', show ? 'Hide password' : 'Show password');
+    btn.setAttribute('aria-pressed', show);
+  });
+});
+
+// ── role toggle ────────────────────────────────────────────────
+function setRole(r) {
+  role = r;
+  document.getElementById('seg_student').setAttribute('aria-pressed', r === 'student');
+  document.getElementById('seg_teacher').setAttribute('aria-pressed', r === 'teacher');
+  document.getElementById('title').textContent = r === 'student' ? 'Create student account' : 'Create teacher account';
+  document.getElementById('sid_wrap').classList.toggle('hidden', r === 'teacher');
+  document.getElementById('teacher_note').classList.toggle('hidden', r !== 'teacher');
+  hideMessage();
+}
+
+document.getElementById('reg_form').addEventListener('submit', (e) => { e.preventDefault(); register(); });
 
 async function register() {
   const student_id       = document.getElementById('student_id').value.trim();
@@ -101,33 +136,39 @@ async function register() {
   const password         = document.getElementById('password').value;
   const confirm_password = document.getElementById('confirm_password').value;
 
-  if (!student_id || !full_name || !email || !password || !confirm_password) {
+  if ((role === 'student' && !student_id) || !full_name || !email || !password || !confirm_password) {
     showMessage('Please fill in all fields', 'error');
     return;
   }
+  if (password !== confirm_password) {
+    showMessage('Passwords do not match', 'error');
+    return;
+  }
 
+  const body = { role, full_name, email, password, confirm_password };
+  if (role === 'student') body.student_id = student_id;
+
+  const btn = document.getElementById('submit_btn');
+  btn.disabled = true;
   try {
-    showMessage('Creating your account...', 'info');
-
+    showMessage('Creating your account…', 'info');
     const res = await fetch(`${API}/auth/register`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        student_id, full_name, email, password, confirm_password
-      })
+      body: JSON.stringify(body)
     });
-
     const data = await res.json();
 
     if (res.ok) {
-      showMessage('✅ ' + data.message + ' Redirecting to login...', 'success');
-      setTimeout(() => window.location.href = '/', 2000);
-    } else {
-      showMessage('❌ ' + errorMessage(data, 'Registration failed'), 'error');
+      showMessage('✅ ' + data.message + (role === 'student' ? ' Redirecting to sign in…' : ''), 'success');
+      if (role === 'student') setTimeout(() => window.location.href = '/', 2000);
+      return;                      // teachers stay on the page to read the approval note
     }
+    showMessage('❌ ' + errorMessage(data, 'Registration failed'), 'error');
   } catch (err) {
     showMessage('❌ Cannot connect to server. Make sure backend is running!', 'error');
   }
+  btn.disabled = false;
 }
 
 // FastAPI sends `detail` as a string for HTTP errors but as an ARRAY of
@@ -148,12 +189,10 @@ function errorMessage(error, fallback) {
 function showMessage(msg, type) {
   const el = document.getElementById('message');
   el.textContent = msg;
-  el.className = 'mb-4 p-4 rounded-lg text-sm font-medium ';
-  if (type === 'error')   el.className += 'bg-red-900 text-red-200';
-  if (type === 'success') el.className += 'bg-green-900 text-green-200';
-  if (type === 'info')    el.className += 'bg-blue-900 text-blue-200';
-  el.classList.remove('hidden');
+  el.className = 'mb-4 p-3 rounded-lg text-sm font-medium ' +
+    (type === 'error' ? 'bg-red-900/70 text-red-200' : type === 'success' ? 'bg-green-900/70 text-green-200' : 'bg-blue-900/70 text-blue-200');
 }
+function hideMessage() { document.getElementById('message').className = 'hidden'; }
 </script>
 </body>
 </html>

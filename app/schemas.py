@@ -1,18 +1,29 @@
-from pydantic import AliasChoices, BaseModel, EmailStr, Field, field_validator
+from pydantic import AliasChoices, BaseModel, EmailStr, Field, field_validator, model_validator
 from typing import Optional
 import re
 
 # ── AUTH SCHEMAS ───────────────────────────────────────────────
 
 class RegisterRequest(BaseModel):
-    student_id: str
+    # Students must give a university ID; teachers have none (one is generated).
+    student_id: Optional[str] = None
     email:      EmailStr
     full_name:  str
     password:   str
     confirm_password: str
+    role:       str = "student"          # "student" | "teacher"
+
+    @field_validator('role')
+    def validate_role(cls, v):
+        v = (v or "student").strip().lower()
+        if v not in ("student", "teacher"):
+            raise ValueError('role must be "student" or "teacher"')
+        return v
 
     @field_validator('student_id')
     def validate_student_id(cls, v):
+        if v is None or v == "":
+            return None
         # Format: 2023-2-60-148
         pattern = r'^\d{4}-\d{1,2}-\d{2,3}-\d{1,3}$'
         if not re.match(pattern, v):
@@ -20,6 +31,12 @@ class RegisterRequest(BaseModel):
                 'Invalid Student ID format. Expected: YYYY-D-DD-DDD (e.g. 2023-2-60-148)'
             )
         return v
+
+    @model_validator(mode='after')
+    def student_needs_id(self):
+        if self.role == "student" and not self.student_id:
+            raise ValueError('Student ID is required for student accounts')
+        return self
 
     @field_validator('password')
     def validate_password(cls, v):
@@ -63,6 +80,7 @@ class AdminRegisterRequest(BaseModel):
 class LoginRequest(BaseModel):
     student_id: str
     password:   str
+    role:       Optional[str] = None   # UI toggle; checked after the password
 
 class ForgotPasswordRequest(BaseModel):
     student_id: str

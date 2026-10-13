@@ -494,12 +494,20 @@ def register_teacher(
     db: Session = Depends(get_db),
     admin = Depends(auth.get_admin_user),
 ):
-    if db.query(models.User).filter(models.User.student_id == data.student_id).first():
-        raise HTTPException(status_code=400, detail="This ID is already registered")
     if db.query(models.User).filter(models.User.email == data.email).first():
         raise HTTPException(status_code=400, detail="Email already registered")
+    login_id = data.student_id
+    if not login_id:
+        import re
+        base = "teacher-" + (re.sub(r"[^a-z0-9]+", "-", data.email.split("@")[0].lower()).strip("-") or "user")
+        login_id, n = base, 1
+        while db.query(models.User).filter(models.User.student_id == login_id).first():
+            n += 1
+            login_id = f"{base}-{n}"
+    elif db.query(models.User).filter(models.User.student_id == login_id).first():
+        raise HTTPException(status_code=400, detail="This ID is already registered")
     db.add(models.User(
-        student_id    = data.student_id,
+        student_id    = login_id,
         email         = data.email,
         full_name     = data.full_name,
         password_hash = auth.hash_password(data.password),

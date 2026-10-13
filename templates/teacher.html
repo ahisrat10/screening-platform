@@ -51,6 +51,23 @@
 
 <div class="max-w-screen-xl mx-auto p-5">
 
+  <!-- CLASSES — Semester -> Course -> Section (Classroom style) -->
+  <section class="mb-8">
+    <div class="flex items-center justify-between mb-4 flex-wrap gap-3">
+      <div>
+        <h2 class="text-white font-semibold text-lg">My Classes</h2>
+        <p class="text-gray-500 text-xs">Semester &rarr; Course &rarr; Section</p>
+      </div>
+      <button onclick="openCreateClass()"
+        class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-semibold transition flex items-center gap-2">
+        <span class="text-lg leading-none">+</span> Create Class
+      </button>
+    </div>
+    <div id="classes_root" class="space-y-7">
+      <p class="text-gray-500 text-sm">Loading classes…</p>
+    </div>
+  </section>
+
   <!-- SECTION 4 — Summary stats -->
   <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
     <div class="bg-gray-900 rounded-xl p-4 border border-green-800">
@@ -119,6 +136,10 @@
           <button id="f_online"     onclick="setFilter('online')"     class="px-3 py-1 rounded-md text-xs font-medium">🟢 Online</button>
           <button id="f_suspicious" onclick="setFilter('suspicious')" class="px-3 py-1 rounded-md text-xs font-medium">⚠️ Suspicious</button>
         </div>
+        <select id="class_filter" onchange="onClassFilter()" aria-label="Filter by class"
+          class="bg-gray-800 text-white text-sm px-3 py-1.5 rounded-lg border border-gray-700 focus:outline-none focus:border-blue-500 max-w-[14rem]">
+          <option value="">All students</option>
+        </select>
         <input id="search" oninput="renderStudents()" placeholder="Search name or ID…"
           class="bg-gray-800 text-white text-sm px-3 py-1.5 rounded-lg border border-gray-700 focus:outline-none focus:border-blue-500 w-48"/>
       </div>
@@ -264,6 +285,65 @@
   </div>
 </div>
 
+<!-- Create class modal -->
+<div id="create_modal" class="hidden fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-[65] p-4">
+  <form id="create_form" class="bg-gray-900 rounded-2xl border border-gray-700 w-full max-w-md p-6 space-y-4">
+    <div class="flex justify-between items-start">
+      <h3 class="text-white font-semibold text-lg">Create class</h3>
+      <button type="button" onclick="closeCreateClass()" class="text-gray-500 hover:text-white text-2xl leading-none">&times;</button>
+    </div>
+    <div>
+      <label for="c_semester" class="text-gray-400 text-xs font-medium block mb-1">Semester</label>
+      <input id="c_semester" list="semester_list" maxlength="50" placeholder="e.g. Fall 2025" required
+        class="w-full bg-gray-800 text-white text-sm px-3 py-2 rounded-lg border border-gray-700 focus:outline-none focus:border-blue-500"/>
+      <datalist id="semester_list"></datalist>
+    </div>
+    <div>
+      <label for="c_course" class="text-gray-400 text-xs font-medium block mb-1">Course name</label>
+      <input id="c_course" maxlength="120" placeholder="e.g. CSE101" required
+        class="w-full bg-gray-800 text-white text-sm px-3 py-2 rounded-lg border border-gray-700 focus:outline-none focus:border-blue-500"/>
+    </div>
+    <div>
+      <label for="c_section" class="text-gray-400 text-xs font-medium block mb-1">Section</label>
+      <input id="c_section" maxlength="50" placeholder="e.g. A" required
+        class="w-full bg-gray-800 text-white text-sm px-3 py-2 rounded-lg border border-gray-700 focus:outline-none focus:border-blue-500"/>
+    </div>
+    <div>
+      <p class="text-gray-400 text-xs font-medium mb-1">Class code <span class="text-gray-600">(students enter this to join)</span></p>
+      <div class="flex items-center gap-2">
+        <div id="c_code" class="flex-1 bg-gray-950 border border-gray-700 rounded-lg px-3 py-2 font-mono text-lg tracking-[0.35em] text-center text-green-300 select-all"></div>
+        <button type="button" onclick="regenCode()" title="Generate another code"
+          class="px-3 py-2 rounded-lg bg-gray-700 hover:bg-gray-600 text-white text-sm">&#8635;</button>
+      </div>
+    </div>
+    <div id="c_error" class="hidden text-sm text-red-300 bg-red-900/40 border border-red-800 rounded-lg px-3 py-2"></div>
+    <div class="flex justify-end gap-2 pt-1">
+      <button type="button" onclick="closeCreateClass()" class="px-4 py-2 rounded-lg text-sm bg-gray-700 hover:bg-gray-600 text-white">Cancel</button>
+      <button id="c_submit" type="submit" class="px-4 py-2 rounded-lg text-sm bg-blue-600 hover:bg-blue-700 text-white font-semibold disabled:opacity-60">Create</button>
+    </div>
+  </form>
+</div>
+
+<!-- Invite student modal -->
+<div id="invite_modal" class="hidden fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-[65] p-4">
+  <form id="invite_form" class="bg-gray-900 rounded-2xl border border-gray-700 w-full max-w-sm p-6 space-y-4">
+    <div class="flex justify-between items-start">
+      <div>
+        <h3 class="text-white font-semibold text-lg">Invite a student</h3>
+        <p id="invite_for" class="text-gray-500 text-xs mt-0.5"></p>
+      </div>
+      <button type="button" onclick="closeInvite()" class="text-gray-500 hover:text-white text-2xl leading-none">&times;</button>
+    </div>
+    <input id="invite_sid" placeholder="Student ID, e.g. 2023-2-60-148" required
+      class="w-full bg-gray-800 text-white text-sm px-3 py-2 rounded-lg border border-gray-700 focus:outline-none focus:border-blue-500"/>
+    <p class="text-gray-500 text-xs">The student sees the invitation under the bell on their dashboard. It expires in 7 days.</p>
+    <div class="flex justify-end gap-2">
+      <button type="button" onclick="closeInvite()" class="px-4 py-2 rounded-lg text-sm bg-gray-700 hover:bg-gray-600 text-white">Cancel</button>
+      <button id="invite_submit" type="submit" class="px-4 py-2 rounded-lg text-sm bg-blue-600 hover:bg-blue-700 text-white font-semibold disabled:opacity-60">Send invitation</button>
+    </div>
+  </form>
+</div>
+
 <!-- Toasts -->
 <div id="toasts" class="fixed bottom-5 right-5 z-[80] space-y-2"></div>
 
@@ -357,6 +437,207 @@ function dialog({ title, message = '', input = null, okText = 'OK', danger = fal
 
 function logout() { localStorage.clear(); window.location.href = '/'; }
 
+// ── CLASSES (Semester -> Course -> Section) ───────────────────
+const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';   // no 0/O/1/I
+const PALETTE = ['#2563eb', '#7c3aed', '#0d9488', '#d97706', '#db2777', '#4f46e5', '#059669', '#dc2626'];
+let classes = [];
+let monitorClass = '';          // '' = all students
+let inviteClassId = null;
+
+function colorFor(s) { let h = 0; for (const c of String(s)) h = (h * 31 + c.charCodeAt(0)) >>> 0; return PALETTE[h % PALETTE.length]; }
+function genCode() {
+  const buf = new Uint32Array(6);
+  crypto.getRandomValues(buf);
+  return Array.from(buf, n => CODE_ALPHABET[n % CODE_ALPHABET.length]).join('');
+}
+async function copyText(text) {
+  try { await navigator.clipboard.writeText(text); return true; } catch (e) {}
+  const ta = document.createElement('textarea');
+  ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+  document.body.appendChild(ta); ta.select();
+  let ok = false;
+  try { ok = document.execCommand('copy'); } catch (e) {}
+  ta.remove();
+  return ok;
+}
+
+async function loadClasses() {
+  classes = await api('/teacher/classes');
+  renderClasses();
+  // keep the monitor's class filter in sync
+  const sel = document.getElementById('class_filter');
+  const keep = monitorClass;
+  sel.innerHTML = '<option value="">All students</option>' + classes.map(c =>
+    `<option value="${c.id}">${esc(c.course_name)} · ${esc(c.section)} (${esc(c.semester)})</option>`).join('');
+  if (keep && classes.some(c => String(c.id) === String(keep))) sel.value = keep;
+  else { monitorClass = ''; sel.value = ''; }
+  document.getElementById('semester_list').innerHTML =
+    [...new Set(classes.map(c => c.semester))].map(s => `<option value="${esc(s)}">`).join('');
+}
+
+function renderClasses() {
+  const root = document.getElementById('classes_root');
+  if (!classes.length) {
+    root.innerHTML = `<div class="bg-gray-900 border border-dashed border-gray-700 rounded-2xl py-12 text-center">
+      <p class="text-gray-400 text-sm">You don't have any classes yet.</p>
+      <button onclick="openCreateClass()" class="mt-3 text-blue-400 hover:underline text-sm">Create your first class</button></div>`;
+    return;
+  }
+  // group: semester -> course -> [sections], keeping the server's newest-first order
+  const sem = new Map();
+  for (const c of classes) {
+    if (!sem.has(c.semester)) sem.set(c.semester, new Map());
+    const courses = sem.get(c.semester);
+    if (!courses.has(c.course_name)) courses.set(c.course_name, []);
+    courses.get(c.course_name).push(c);
+  }
+  let html = '';
+  for (const [semester, courses] of sem) {
+    html += `<div><h3 class="text-white font-semibold border-b border-gray-800 pb-2 mb-4">${esc(semester)}</h3><div class="space-y-5">`;
+    for (const [course, sections] of courses) {
+      html += `<div><h4 class="text-gray-300 text-sm font-medium mb-2">${esc(course)}</h4>
+        <div class="grid sm:grid-cols-2 xl:grid-cols-3 gap-4">${sections.map(classCard).join('')}</div></div>`;
+    }
+    html += '</div></div>';
+  }
+  root.innerHTML = html;
+}
+
+function classCard(c) {
+  const live = !!c.active_lab;
+  return `<article class="bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden flex flex-col">
+    <div class="px-4 py-3" style="background:${colorFor(c.course_name)}">
+      <p class="text-white/70 text-[11px]">${esc(c.semester)} &rarr; ${esc(c.course_name)} &rarr; Section ${esc(c.section)}</p>
+      <h5 class="text-white font-bold text-lg leading-snug">${esc(c.course_name)}</h5>
+      <p class="text-white/90 text-sm">Section ${esc(c.section)}</p>
+    </div>
+    <div class="p-4 space-y-3 flex-1">
+      <div class="flex items-center justify-between text-sm">
+        <span class="text-gray-300">👥 ${c.student_count} student${c.student_count === 1 ? '' : 's'}</span>
+        ${live ? '<span class="px-2 py-0.5 rounded-full text-xs font-medium bg-green-900 text-green-300">● Lab running</span>' : ''}
+      </div>
+      <div class="flex items-center gap-2">
+        <span class="text-gray-500 text-xs">Class code</span>
+        <code class="font-mono tracking-[0.25em] text-green-300 bg-gray-950 border border-gray-800 rounded px-2 py-0.5 select-all">${esc(c.class_code)}</code>
+        <button onclick="copyCode('${esc(c.class_code)}')" class="text-gray-400 hover:text-white text-xs" title="Copy code">⧉</button>
+      </div>
+      <div class="flex items-center justify-between">
+        <span class="text-gray-300 text-sm">AI detection</span>
+        <button role="switch" aria-checked="${c.ai_detection_enabled}" aria-label="AI detection for ${esc(c.course_name)} ${esc(c.section)}"
+          onclick="toggleAI(${c.id}, ${!c.ai_detection_enabled})"
+          class="relative w-11 h-6 rounded-full transition ${c.ai_detection_enabled ? 'bg-blue-600' : 'bg-gray-700'}">
+          <span class="absolute top-0.5 ${c.ai_detection_enabled ? 'left-[22px]' : 'left-0.5'} w-5 h-5 rounded-full bg-white transition-all"></span>
+        </button>
+      </div>
+    </div>
+    <div class="px-4 pb-4 grid grid-cols-2 gap-2">
+      <button onclick="${live ? 'endLab' : 'startLab'}(${c.id})"
+        class="col-span-2 py-2 rounded-lg text-sm font-semibold text-white ${live ? 'bg-red-600 hover:bg-red-700' : 'bg-green-600 hover:bg-green-700'}">
+        ${live ? '■ End Lab' : '▶ Start Lab'}
+      </button>
+      <button onclick="copyInviteLink(${c.id})" class="py-1.5 rounded-lg text-xs font-medium bg-gray-700 hover:bg-gray-600 text-white">🔗 Invite link</button>
+      <button onclick="openInvite(${c.id})" class="py-1.5 rounded-lg text-xs font-medium bg-gray-700 hover:bg-gray-600 text-white">✉ Invite student</button>
+      <button onclick="monitorThisClass(${c.id})" class="col-span-2 py-1.5 rounded-lg text-xs font-medium bg-gray-800 hover:bg-gray-700 text-gray-200 border border-gray-700">Monitor this class</button>
+    </div>
+  </article>`;
+}
+
+async function copyCode(code) {
+  toast((await copyText(code)) ? `Class code ${code} copied` : `Class code: ${code}`, 'ok');
+}
+
+async function copyInviteLink(id, regenerate = false) {
+  try {
+    const r = await post(`/teacher/classes/${id}/invite-link${regenerate ? '?regenerate=true' : ''}`);
+    const origin = /^https?:/.test(window.location.origin) ? window.location.origin : API;
+    const url = origin + r.path;
+    const when = new Date(r.expires_at).toLocaleDateString();
+    toast((await copyText(url)) ? `Invite link copied — expires ${when}` : `Invite link: ${url}`, 'ok');
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+async function toggleAI(id, enabled) {
+  try {
+    await post(`/teacher/classes/${id}/ai-detection`, { enabled });
+    toast(`AI detection ${enabled ? 'enabled' : 'disabled'}`, 'ok');
+    await loadClasses();
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+async function startLab(id) {
+  try { await post(`/teacher/classes/${id}/lab/start`); toast('Lab started', 'ok'); await loadClasses(); }
+  catch (e) { toast(e.message, 'err'); }
+}
+async function endLab(id) {
+  const ok = await dialog({ title: 'End this lab?', message: 'The monitoring session is closed and added to students\' history.', okText: 'End Lab', danger: true });
+  if (!ok) return;
+  try { await post(`/teacher/classes/${id}/lab/end`); toast('Lab ended', 'ok'); await loadClasses(); }
+  catch (e) { toast(e.message, 'err'); }
+}
+
+function monitorThisClass(id) {
+  monitorClass = String(id);
+  document.getElementById('class_filter').value = monitorClass;
+  loadStudents().then(() => document.getElementById('student_rows').scrollIntoView({ behavior: 'smooth', block: 'center' }));
+}
+function onClassFilter() {
+  monitorClass = document.getElementById('class_filter').value;
+  loadStudents();
+}
+
+// create class
+function regenCode() { document.getElementById('c_code').textContent = genCode(); }
+function openCreateClass() {
+  document.getElementById('create_form').reset();
+  document.getElementById('c_error').classList.add('hidden');
+  regenCode();
+  document.getElementById('create_modal').classList.remove('hidden');
+  document.getElementById('c_semester').focus();
+}
+function closeCreateClass() { document.getElementById('create_modal').classList.add('hidden'); }
+document.getElementById('create_form').addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  const btn = document.getElementById('c_submit'), err = document.getElementById('c_error');
+  btn.disabled = true; err.classList.add('hidden');
+  try {
+    const r = await post('/teacher/classes', {
+      semester:    document.getElementById('c_semester').value,
+      course_name: document.getElementById('c_course').value,
+      section:     document.getElementById('c_section').value,
+      class_code:  document.getElementById('c_code').textContent.trim(),
+    });
+    closeCreateClass();
+    toast(`Class created — code ${r.class.class_code}`, 'ok');
+    await loadClasses();
+  } catch (e) {
+    if (e.status === 409) regenCode();      // code collided: show a fresh one
+    err.textContent = e.status === 409 ? 'That code was taken — a new one was generated. Press Create again.' : e.message;
+    err.classList.remove('hidden');
+  }
+  btn.disabled = false;
+});
+
+// invite a specific student
+function openInvite(id) {
+  inviteClassId = id;
+  const c = classes.find(x => x.id === id);
+  document.getElementById('invite_for').textContent = c ? `${c.course_name} · Section ${c.section} (${c.semester})` : '';
+  document.getElementById('invite_sid').value = '';
+  document.getElementById('invite_modal').classList.remove('hidden');
+  document.getElementById('invite_sid').focus();
+}
+function closeInvite() { document.getElementById('invite_modal').classList.add('hidden'); inviteClassId = null; }
+document.getElementById('invite_form').addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  const btn = document.getElementById('invite_submit'); btn.disabled = true;
+  try {
+    const r = await post(`/teacher/classes/${inviteClassId}/invite`, { student_id: document.getElementById('invite_sid').value });
+    toast(r.message, 'ok');
+    closeInvite();
+  } catch (e) { toast(e.message, 'err'); }
+  btn.disabled = false;
+});
+
 // ── SECTION 4: summary ─────────────────────────────────────────
 async function loadSummary() {
   const s = await api('/teacher/summary');
@@ -428,7 +709,9 @@ async function saveProblem(ev) {
 
 // ── SECTION 1: live monitor ────────────────────────────────────
 async function loadStudents() {
-  students = await api('/teacher/students?active_only=false');
+  const path = monitorClass ? `/teacher/classes/${encodeURIComponent(monitorClass)}/students`
+                            : '/teacher/students?active_only=false';
+  students = await api(path);
   renderStudents();
 }
 
@@ -663,7 +946,7 @@ async function refreshAll() {
   refreshing = true;
   const dot = document.getElementById('refresh_dot'), text = document.getElementById('refresh_text');
   try {
-    await Promise.all([loadStudents(), loadSummary(), loadExam(), selectedId ? loadPanel() : null]);
+    await Promise.all([loadClasses(), loadStudents(), loadSummary(), loadExam(), selectedId ? loadPanel() : null]);
     dot.className = 'w-2 h-2 rounded-full bg-green-400';
     text.textContent = 'Auto-refresh 10s · updated ' + new Date().toLocaleTimeString();
   } catch (e) {
@@ -674,7 +957,10 @@ async function refreshAll() {
 }
 
 document.addEventListener('keydown', e => {
-  if (e.key === 'Escape') { closeReport(); if (document.getElementById('dlg').classList.contains('hidden')) closePanel(); }
+  if (e.key === 'Escape') {
+    closeReport(); closeCreateClass(); closeInvite();
+    if (document.getElementById('dlg').classList.contains('hidden')) closePanel();
+  }
 });
 
 refreshAll();

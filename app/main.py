@@ -12,6 +12,7 @@ from .database import engine, get_db
 from . import models, schemas, auth
 from .teacher import router as teacher_router
 from .export import router as export_router
+from .classes import router as classes_router, ai_detection_allowed
 from .email_service import generate_otp, save_otp, send_otp_email, send_welcome_email
 
 models.Base.metadata.create_all(bind=engine)
@@ -88,6 +89,7 @@ app.add_middleware(
 
 app.include_router(teacher_router)
 app.include_router(export_router)
+app.include_router(classes_router)
 
 logger = logging.getLogger("screening")
 
@@ -141,23 +143,43 @@ def get_student_from_token(
 @app.post("/auth/register", response_model=schemas.MessageResponse)
 def register(data: schemas.RegisterRequest, db: Session = Depends(get_db)):
     if db.query(models.User).filter(
-        models.User.student_id == data.student_id
-    ).first():
-        raise HTTPException(status_code=400, detail="Student ID already registered")
-    if db.query(models.User).filter(
         models.User.email == data.email
     ).first():
         raise HTTPException(status_code=400, detail="Email already registered")
+
+    if data.role == "teacher":
+        # Teachers have no university ID: derive a unique login ID from the email.
+        import re
+        base = "teacher-" + (re.sub(r"[^a-z0-9]+", "-", data.email.split("@")[0].lower()).strip("-") or "user")
+        login_id, n = base, 1
+        while db.query(models.User).filter(models.User.student_id == login_id).first():
+            n += 1
+            login_id = f"{base}-{n}"
+    else:
+        login_id = data.student_id
+        if db.query(models.User).filter(models.User.student_id == login_id).first():
+            raise HTTPException(status_code=400, detail="Student ID already registered")
+
+    # Teacher accounts can see students' code and behaviour, so they are NOT
+    # usable until an admin approves them (is_active=False until then).
+    is_teacher = data.role == "teacher"
     user = models.User(
-        student_id    = data.student_id,
+        student_id    = login_id,
         email         = data.email,
         full_name     = data.full_name,
         password_hash = auth.hash_password(data.password),
-        role          = "student",
-        is_active     = True
+        role          = data.role,
+        is_active     = not is_teacher,
     )
     db.add(user)
     db.commit()
+
+    if is_teacher:
+        return {
+            "message": f"Teacher account created for {data.full_name}. An administrator must "
+                       f"approve it before you can log in. Your login ID: {login_id}",
+            "success": True,
+        }
     send_welcome_email(data.email, data.student_id, data.full_name)
     return {"message": f"Account created! Welcome {data.full_name}", "success": True}
 
@@ -240,6 +262,17 @@ def login(data: schemas.LoginRequest, db: Session = Depends(get_db)):
     user.failed_attempts = 0
     user.locked_until    = None
     db.commit()
+
+    # Checked only after the password is verified, so it can't be used to probe accounts.
+    if not user.is_active:
+        detail = ("Your teacher account is waiting for administrator approval."
+                  if user.role == "teacher" else "This account has been deactivated.")
+        raise HTTPException(status_code=403, detail=detail)
+    if data.role and user.role in ("student", "teacher") and data.role != user.role:
+        raise HTTPException(
+            status_code=403,
+            detail=f"This is a {user.role} account. Switch the toggle to \"{user.role.title()}\" and try again."
+        )
 
     token = auth.create_token({"sub": user.student_id, "role": user.role})
     return {
@@ -755,6 +788,8 @@ def analyze_ai_detection(
     if data.student_id and data.student_id != token_student_id:
         raise HTTPException(status_code=403, detail="Token does not match Student ID")
     student_id      = token_student_id
+    if not ai_detection_allowed(db, student_id):
+        raise HTTPException(status_code=403, detail="AI detection is turned off for your class")
     behavioral_dict = data.behavioral.model_dump()
 
     result = predict_ai_detection(
@@ -1199,6 +1234,8 @@ PAGES = {
     "/":               "login.html",
     "/login":          "login.html",
     "/register":       "register.html",
+    "/student-dashboard": "student_dashboard.html",
+    "/admin-dashboard":   "admin_dashboard.html",
     "/dashboard":      "dashboard.html",
     "/admin":          "admin.html",
     "/admin/register": "admin_register.html",
@@ -1214,6 +1251,12 @@ def _make_page(filename: str):
             raise HTTPException(status_code=404, detail=f"Page not found: {filename}")
         return HTMLResponse(path.read_text(encoding="utf-8"))
     return page
+
+
+@app.get("/join/{token}", response_class=HTMLResponse, include_in_schema=False)
+def join_page(token: str):
+    """Invitation link target: the student dashboard reads the token from the URL."""
+    return _make_page("student_dashboard.html")()
 
 
 for _route, _file in PAGES.items():

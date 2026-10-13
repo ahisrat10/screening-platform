@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>My Classes — Screening Platform</title>
+<script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-950 min-h-screen text-gray-200">
+
+<!-- Header -->
+<header class="bg-gray-900 border-b border-gray-800 px-5 py-3 sticky top-0 z-30">
+  <div class="max-w-5xl mx-auto flex justify-between items-center gap-3">
+    <div class="flex items-center gap-3">
+      <span class="text-2xl">🎓</span>
+      <div>
+        <h1 class="text-white font-bold leading-tight">My Classes</h1>
+        <p id="who" class="text-gray-500 text-xs"></p>
+      </div>
+    </div>
+    <div class="flex items-center gap-2">
+      <a href="/dashboard" class="hidden sm:inline-block text-gray-300 hover:text-white text-sm px-3 py-2 rounded-lg hover:bg-gray-800">Exam &amp; monitor</a>
+
+      <!-- notification bell -->
+      <div class="relative">
+        <button id="bell" aria-label="Invitations" aria-expanded="false"
+          class="relative p-2 rounded-lg text-gray-300 hover:text-white hover:bg-gray-800">
+          <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.7">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M14.86 17.08a23.85 23.85 0 0 0 5.45-1.31A8.97 8.97 0 0 1 18 9.75V9A6 6 0 0 0 6 9v.75a8.97 8.97 0 0 1-2.31 6.02c1.78.65 3.58 1.1 5.45 1.31m5.72 0a24.26 24.26 0 0 1-5.72 0m5.72 0a3 3 0 1 1-5.72 0"/>
+          </svg>
+          <span id="bell_badge" class="hidden absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[11px] font-bold flex items-center justify-center"></span>
+        </button>
+        <div id="bell_panel" class="hidden absolute right-0 mt-2 w-80 max-w-[90vw] bg-gray-900 border border-gray-700 rounded-xl shadow-2xl z-40">
+          <div class="px-4 py-3 border-b border-gray-800 text-sm font-semibold text-white">Pending invitations</div>
+          <div id="bell_list" class="max-h-80 overflow-y-auto divide-y divide-gray-800"></div>
+        </div>
+      </div>
+
+      <button onclick="logout()" class="bg-red-600 hover:bg-red-700 text-white px-3 py-2 rounded-lg text-sm font-medium">Logout</button>
+    </div>
+  </div>
+</header>
+
+<main class="max-w-5xl mx-auto p-5 space-y-8">
+
+  <div id="banner" class="hidden p-3 rounded-lg text-sm font-medium" role="alert"></div>
+
+  <!-- Join class -->
+  <section class="bg-gray-900 border border-gray-800 rounded-2xl p-5">
+    <h2 class="text-white font-semibold mb-1">Join a class</h2>
+    <p class="text-gray-500 text-sm mb-3">Enter the 6-character class code from your teacher.</p>
+    <form id="join_form" class="flex gap-2 flex-wrap" autocomplete="off">
+      <input id="join_code" maxlength="6" placeholder="e.g. K7M3QX" aria-label="Class code"
+        class="flex-1 min-w-[10rem] bg-gray-800 text-white tracking-[0.3em] uppercase text-center font-mono text-lg border border-gray-700 rounded-lg px-4 py-2.5
+               focus:outline-none focus:border-blue-500"/>
+      <button id="join_btn" type="submit" class="bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white font-semibold px-6 rounded-lg">Join class</button>
+    </form>
+  </section>
+
+  <!-- Classes -->
+  <section>
+    <div class="flex items-baseline justify-between mb-3">
+      <h2 class="text-white font-semibold text-lg">Your classes</h2>
+      <span id="class_count" class="text-gray-500 text-sm"></span>
+    </div>
+    <div id="classes" class="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+      <div class="col-span-full text-gray-500 text-sm py-10 text-center">Loading…</div>
+    </div>
+  </section>
+
+  <!-- History -->
+  <section>
+    <h2 class="text-white font-semibold text-lg mb-3">Lab session history</h2>
+    <div class="bg-gray-900 border border-gray-800 rounded-2xl overflow-x-auto">
+      <table class="w-full text-sm min-w-[560px]">
+        <thead>
+          <tr class="text-gray-500 text-xs uppercase border-b border-gray-800 text-left">
+            <th class="px-4 py-3 font-medium">Date</th>
+            <th class="px-4 py-3 font-medium">Class</th>
+            <th class="px-4 py-3 font-medium">Duration</th>
+            <th class="px-4 py-3 font-medium">AI score</th>
+          </tr>
+        </thead>
+        <tbody id="history" class="divide-y divide-gray-800">
+          <tr><td colspan="4" class="px-4 py-8 text-center text-gray-500">Loading…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+</main>
+
+<script>
+const API   = 'https://screening-platform-production.up.railway.app';
+const token = localStorage.getItem('token');
+const role  = localStorage.getItem('role');
+
+// Invitation link (/join/<token>): remember it across the login redirect.
+const joinMatch = window.location.pathname.match(/^\/join\/([^\/]+)$/);
+if (joinMatch) {
+  try { localStorage.setItem('pending_invite', decodeURIComponent(joinMatch[1])); } catch (e) {}
+}
+if (!token) { window.location.href = '/'; }
+else if (role === 'teacher') { window.location.href = '/teacher'; }
+else if (role === 'admin')   { window.location.href = '/admin'; }
+
+document.getElementById('who').textContent =
+  `${localStorage.getItem('full_name') || ''} · ${localStorage.getItem('student_id') || ''}`;
+
+// ── helpers ────────────────────────────────────────────────────
+function esc(v) {
+  return String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+function errorText(d, fb) {
+  const x = d && d.detail;
+  if (typeof x === 'string' && x) return x;
+  if (Array.isArray(x) && x.length) return x.map(e => e && e.msg ? e.msg : JSON.stringify(e)).join('; ');
+  return fb;
+}
+async function api(path, opts = {}) {
+  const res = await fetch(API + path, {
+    ...opts,
+    headers: { 'Authorization': `Bearer ${token}`, ...(opts.body ? { 'Content-Type': 'application/json' } : {}) },
+  });
+  if (res.status === 401) { localStorage.clear(); window.location.href = '/'; throw new Error('Session expired'); }
+  const data = await res.json().catch(() => null);
+  if (!res.ok) { const e = new Error(errorText(data, `Request failed (${res.status})`)); e.status = res.status; throw e; }
+  return data;
+}
+function banner(msg, kind) {
+  const el = document.getElementById('banner');
+  el.textContent = msg;
+  el.className = 'p-3 rounded-lg text-sm font-medium ' +
+    (kind === 'err' ? 'bg-red-900/70 text-red-200' : 'bg-green-900/70 text-green-200');
+  clearTimeout(banner._t);
+  banner._t = setTimeout(() => el.className = 'hidden', 6000);
+}
+function logout() { localStorage.clear(); window.location.href = '/'; }
+
+const PALETTE = ['#2563eb', '#7c3aed', '#0d9488', '#d97706', '#db2777', '#4f46e5', '#059669', '#dc2626'];
+function colorFor(s) { let h = 0; for (const c of String(s)) h = (h * 31 + c.charCodeAt(0)) >>> 0; return PALETTE[h % PALETTE.length]; }
+
+// ── classes ────────────────────────────────────────────────────
+async function loadClasses() {
+  const list = await api('/student/classes');
+  document.getElementById('class_count').textContent = list.length ? `${list.length} class${list.length === 1 ? '' : 'es'}` : '';
+  const root = document.getElementById('classes');
+  if (!list.length) {
+    root.innerHTML = `<div class="col-span-full bg-gray-900 border border-dashed border-gray-700 rounded-2xl py-12 text-center text-gray-500 text-sm">
+      You haven't joined any classes yet. Enter a class code above to get started.</div>`;
+    return;
+  }
+  root.innerHTML = list.map(c => `
+    <article class="bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden hover:border-gray-600 transition">
+      <div class="px-4 py-4" style="background:${colorFor(c.course_name)}">
+        <h3 class="text-white font-bold text-lg leading-snug">${esc(c.course_name)}</h3>
+        <p class="text-white/80 text-sm">Section ${esc(c.section)}</p>
+      </div>
+      <div class="p-4 space-y-1 text-sm">
+        <p class="text-gray-300">👩‍🏫 ${esc(c.teacher_name || 'Unknown teacher')}</p>
+        <p class="text-gray-500">${esc(c.semester)}</p>
+        ${c.active_lab ? '<p class="inline-block mt-2 px-2 py-0.5 rounded-full text-xs font-medium bg-green-900 text-green-300">● Lab in progress</p>' : ''}
+      </div>
+    </article>`).join('');
+}
+
+document.getElementById('join_code').addEventListener('input', e => {
+  e.target.value = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '');
+});
+document.getElementById('join_form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const code = document.getElementById('join_code').value.trim();
+  if (code.length !== 6) { banner('A class code is 6 characters long.', 'err'); return; }
+  const btn = document.getElementById('join_btn'); btn.disabled = true;
+  try {
+    const r = await api('/student/classes/join', { method: 'POST', body: JSON.stringify({ code }) });
+    banner(r.message, 'ok');
+    document.getElementById('join_code').value = '';
+    await Promise.all([loadClasses(), loadInvitations()]);
+  } catch (err) { banner(err.message, 'err'); }
+  btn.disabled = false;
+});
+
+// ── invitation link handling ───────────────────────────────────
+async function handlePendingInvite() {
+  let t = null;
+  try { t = localStorage.getItem('pending_invite'); } catch (e) {}
+  if (!t || role !== 'student') return;
+  try { localStorage.removeItem('pending_invite'); } catch (e) {}
+  if (joinMatch) window.history.replaceState({}, '', '/student-dashboard');
+  try {
+    const r = await api('/student/classes/join-invite', { method: 'POST', body: JSON.stringify({ token: t }) });
+    banner(r.message, 'ok');
+  } catch (err) { banner(err.message, 'err'); }
+}
+
+// ── bell / invitations ─────────────────────────────────────────
+let invitations = [];
+async function loadInvitations() {
+  invitations = await api('/student/invitations');
+  const badge = document.getElementById('bell_badge');
+  badge.textContent = invitations.length > 9 ? '9+' : invitations.length;
+  badge.classList.toggle('hidden', invitations.length === 0);
+  const list = document.getElementById('bell_list');
+  list.innerHTML = invitations.length ? invitations.map(i => `
+    <div class="p-4">
+      <p class="text-white text-sm font-medium">${esc(i.course_name)} <span class="text-gray-400 font-normal">· Section ${esc(i.section)}</span></p>
+      <p class="text-gray-500 text-xs mt-0.5">${esc(i.semester)} · from ${esc(i.teacher_name || 'a teacher')}</p>
+      <div class="flex gap-2 mt-3">
+        <button onclick="respond(${i.id}, 'accept')" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold py-1.5 rounded-lg">Accept</button>
+        <button onclick="respond(${i.id}, 'decline')" class="flex-1 bg-gray-700 hover:bg-gray-600 text-white text-xs font-semibold py-1.5 rounded-lg">Decline</button>
+      </div>
+    </div>`).join('')
+    : '<p class="p-6 text-center text-gray-500 text-sm">No pending invitations.</p>';
+}
+async function respond(id, action) {
+  try {
+    const r = await api(`/student/invitations/${id}/${action}`, { method: 'POST' });
+    banner(r.message, 'ok');
+    await Promise.all([loadInvitations(), loadClasses()]);
+  } catch (err) { banner(err.message, 'err'); await loadInvitations(); }
+}
+document.getElementById('bell').addEventListener('click', (e) => {
+  e.stopPropagation();
+  const p = document.getElementById('bell_panel');
+  p.classList.toggle('hidden');
+  document.getElementById('bell').setAttribute('aria-expanded', !p.classList.contains('hidden'));
+});
+document.addEventListener('click', (e) => {
+  const p = document.getElementById('bell_panel');
+  if (!p.contains(e.target)) p.classList.add('hidden');
+});
+
+// ── history ────────────────────────────────────────────────────
+function scoreBadge(s) {
+  if (s == null) return '<span class="text-gray-600">—</span>';
+  const cls = s >= 70 ? 'bg-red-900 text-red-300' : s >= 40 ? 'bg-yellow-900 text-yellow-300' : 'bg-green-900 text-green-300';
+  return `<span class="px-2 py-0.5 rounded-full text-xs font-semibold ${cls}">${s.toFixed(1)}%</span>`;
+}
+async function loadHistory() {
+  const rows = await api('/student/lab-sessions');
+  document.getElementById('history').innerHTML = rows.length ? rows.map(r => `
+    <tr class="hover:bg-gray-800/50">
+      <td class="px-4 py-3 text-gray-300 whitespace-nowrap">${esc(r.date)}</td>
+      <td class="px-4 py-3"><span class="text-white">${esc(r.course_name)}</span> <span class="text-gray-500">· Section ${esc(r.section)}</span></td>
+      <td class="px-4 py-3 text-gray-300">${r.duration_minutes < 1 ? '< 1 min' : Math.round(r.duration_minutes) + ' min'}</td>
+      <td class="px-4 py-3">${scoreBadge(r.ai_score)}</td>
+    </tr>`).join('')
+    : '<tr><td colspan="4" class="px-4 py-8 text-center text-gray-500">No finished lab sessions yet.</td></tr>';
+}
+
+// ── boot ───────────────────────────────────────────────────────
+(async function init() {
+  if (!token || role !== 'student') return;
+  await handlePendingInvite();
+  const results = await Promise.allSettled([loadClasses(), loadInvitations(), loadHistory()]);
+  const failed = results.find(r => r.status === 'rejected');
+  if (failed) banner(failed.reason.message, 'err');
+  setInterval(() => { if (!document.hidden) loadInvitations().catch(() => {}); }, 30000);
+})();
+</script>
+</body>
+</html>

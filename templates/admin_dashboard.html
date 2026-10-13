@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Database Management — Screening Platform</title>
+<script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-950 min-h-screen text-gray-200">
+
+<header class="bg-gray-900 border-b border-gray-800 px-5 py-3 sticky top-0 z-30">
+  <div class="max-w-screen-xl mx-auto flex justify-between items-center gap-3 flex-wrap">
+    <div class="flex items-center gap-3">
+      <span class="text-2xl">🗄️</span>
+      <div>
+        <h1 class="text-white font-bold leading-tight">Database Management</h1>
+        <p class="text-gray-500 text-xs">Administrator panel</p>
+      </div>
+    </div>
+    <div class="flex items-center gap-2">
+      <a href="/admin" class="text-gray-300 hover:text-white text-sm px-3 py-2 rounded-lg hover:bg-gray-800">Live monitor</a>
+      <a href="/teacher" class="text-gray-300 hover:text-white text-sm px-3 py-2 rounded-lg hover:bg-gray-800">Teacher view</a>
+      <span id="who" class="text-gray-400 text-sm hidden md:inline"></span>
+      <button onclick="logout()" class="bg-red-600 hover:bg-red-700 text-white px-3 py-2 rounded-lg text-sm font-medium">Logout</button>
+    </div>
+  </div>
+</header>
+
+<main class="max-w-screen-xl mx-auto p-5 space-y-6">
+
+  <!-- Stats -->
+  <section class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+    <div class="bg-gray-900 rounded-xl p-4 border border-blue-800">
+      <p class="text-gray-400 text-xs mb-1">Total users</p>
+      <p id="st_users" class="text-3xl font-bold text-blue-400">—</p>
+      <p id="st_roles" class="text-gray-500 text-xs mt-1"></p>
+    </div>
+    <div class="bg-gray-900 rounded-xl p-4 border border-green-800">
+      <p class="text-gray-400 text-xs mb-1">Total sessions</p>
+      <p id="st_sessions" class="text-3xl font-bold text-green-400">—</p>
+      <p id="st_labs" class="text-gray-500 text-xs mt-1"></p>
+    </div>
+    <div class="bg-gray-900 rounded-xl p-4 border border-yellow-800">
+      <p class="text-gray-400 text-xs mb-1">Total submissions</p>
+      <p id="st_subs" class="text-3xl font-bold text-yellow-400">—</p>
+      <p id="st_snaps" class="text-gray-500 text-xs mt-1"></p>
+    </div>
+    <div class="bg-gray-900 rounded-xl p-4 border border-purple-800">
+      <p class="text-gray-400 text-xs mb-1">Pending teachers</p>
+      <p id="st_pending" class="text-3xl font-bold text-purple-400">—</p>
+      <p id="st_labels" class="text-gray-500 text-xs mt-1"></p>
+    </div>
+  </section>
+
+  <div id="banner" class="hidden p-3 rounded-lg text-sm font-medium" role="alert"></div>
+
+  <!-- Users -->
+  <section class="bg-gray-900 rounded-xl border border-gray-800">
+    <div class="p-4 border-b border-gray-800 flex justify-between items-center gap-3 flex-wrap">
+      <h2 class="text-white font-semibold">Users <span id="count" class="text-gray-500 font-normal text-sm"></span></h2>
+      <div class="flex items-center gap-2 flex-wrap">
+        <input id="search" placeholder="Search name, email or ID…" aria-label="Search users"
+          class="bg-gray-800 text-white text-sm px-3 py-2 rounded-lg border border-gray-700 focus:outline-none focus:border-blue-500 w-56"/>
+        <select id="role_filter" aria-label="Filter by role"
+          class="bg-gray-800 text-white text-sm px-3 py-2 rounded-lg border border-gray-700 focus:outline-none focus:border-blue-500">
+          <option value="">All roles</option>
+          <option value="student">Student</option>
+          <option value="teacher">Teacher</option>
+          <option value="admin">Admin</option>
+        </select>
+        <button id="csv_btn" class="bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium px-4 py-2 rounded-lg">⬇ Export CSV</button>
+      </div>
+    </div>
+
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm min-w-[860px]">
+        <thead>
+          <tr class="text-gray-500 text-xs uppercase border-b border-gray-800 text-left">
+            <th class="px-4 py-3 font-medium">Name</th>
+            <th class="px-4 py-3 font-medium">Email</th>
+            <th class="px-4 py-3 font-medium">Role</th>
+            <th class="px-4 py-3 font-medium">Created</th>
+            <th class="px-4 py-3 font-medium">Last active</th>
+            <th class="px-4 py-3 font-medium text-right">Actions</th>
+          </tr>
+        </thead>
+        <tbody id="rows" class="divide-y divide-gray-800">
+          <tr><td colspan="6" class="px-4 py-10 text-center text-gray-500">Loading users…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+</main>
+
+<!-- Delete confirmation -->
+<div id="confirm" class="hidden fixed inset-0 bg-black/75 flex items-center justify-center z-50 p-4">
+  <div class="bg-gray-900 rounded-2xl border border-gray-700 w-full max-w-md p-6">
+    <h3 class="text-white font-semibold text-lg">Delete this user?</h3>
+    <p id="confirm_who" class="text-gray-300 text-sm mt-2"></p>
+    <p class="text-gray-500 text-xs mt-3">
+      This permanently removes the account and everything recorded about it: sessions, submissions,
+      code snapshots, behavioural data and labels. Classes a teacher owns are removed too. Labels a
+      teacher wrote about other students are kept. This cannot be undone.
+    </p>
+    <div class="flex justify-end gap-2 mt-5">
+      <button id="confirm_cancel" class="px-4 py-2 rounded-lg text-sm bg-gray-700 hover:bg-gray-600 text-white">Cancel</button>
+      <button id="confirm_ok" class="px-4 py-2 rounded-lg text-sm bg-red-600 hover:bg-red-700 text-white font-medium">Delete permanently</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const API   = 'https://screening-platform-production.up.railway.app';
+const token = localStorage.getItem('token');
+const role  = localStorage.getItem('role');
+const me    = localStorage.getItem('student_id');
+
+if (!token || role !== 'admin') { window.location.href = '/'; }
+document.getElementById('who').textContent = localStorage.getItem('full_name') || '';
+
+let users = [];
+
+// ── helpers ────────────────────────────────────────────────────
+function esc(v) {
+  return String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+function errorText(d, fb) {
+  const x = d && d.detail;
+  if (typeof x === 'string' && x) return x;
+  if (Array.isArray(x) && x.length) return x.map(e => e && e.msg ? e.msg : JSON.stringify(e)).join('; ');
+  return fb;
+}
+async function request(path, opts = {}) {
+  const res = await fetch(API + path, { ...opts, headers: { 'Authorization': `Bearer ${token}`, ...(opts.headers || {}) } });
+  if (res.status === 401) { localStorage.clear(); window.location.href = '/'; throw new Error('Session expired'); }
+  if (!res.ok) {
+    const d = await res.json().catch(() => null);
+    throw new Error(errorText(d, `Request failed (${res.status})`));
+  }
+  return res;
+}
+const getJSON = async (p, o) => (await request(p, o)).json();
+
+function banner(msg, kind) {
+  const el = document.getElementById('banner');
+  el.textContent = msg;
+  el.className = 'p-3 rounded-lg text-sm font-medium ' + (kind === 'err' ? 'bg-red-900/70 text-red-200' : 'bg-green-900/70 text-green-200');
+  clearTimeout(banner._t);
+  banner._t = setTimeout(() => el.className = 'hidden', 6000);
+}
+function parseUTC(s) {
+  if (!s) return null;
+  let t = String(s).replace(' ', 'T');
+  if (!/[zZ]|[+-]\d\d:?\d\d$/.test(t)) t += 'Z';
+  const d = new Date(t);
+  return isNaN(d) ? null : d;
+}
+function fmtDate(s) { const d = parseUTC(s); return d ? d.toLocaleDateString() : '—'; }
+function ago(s) {
+  const d = parseUTC(s);
+  if (!d) return 'Never';
+  const sec = Math.max(0, Math.round((Date.now() - d) / 1000));
+  if (sec < 60) return 'Just now';
+  if (sec < 3600) return Math.floor(sec / 60) + ' min ago';
+  if (sec < 86400) return Math.floor(sec / 3600) + ' h ago';
+  if (sec < 86400 * 30) return Math.floor(sec / 86400) + ' d ago';
+  return d.toLocaleDateString();
+}
+function logout() { localStorage.clear(); window.location.href = '/'; }
+
+// ── stats ──────────────────────────────────────────────────────
+async function loadStats() {
+  const s = await getJSON('/admin/db-stats');
+  const set = (id, v) => document.getElementById(id).textContent = v;
+  set('st_users', s.total_users);
+  set('st_roles', `${s.users_by_role.student} students · ${s.users_by_role.teacher} teachers · ${s.users_by_role.admin} admins`);
+  set('st_sessions', s.total_sessions);
+  set('st_labs', `${s.lab_sessions} lab sessions · ${s.classes} classes`);
+  set('st_subs', s.total_submissions);
+  set('st_snaps', `${s.code_snapshots} code snapshots`);
+  set('st_pending', s.pending_teachers);
+  set('st_labels', `${s.teacher_labels} teacher labels`);
+}
+
+// ── users table ────────────────────────────────────────────────
+const ROLE_STYLE = { student: 'bg-blue-900 text-blue-300', teacher: 'bg-purple-900 text-purple-300', admin: 'bg-red-900 text-red-300' };
+
+async function loadUsers() {
+  users = await getJSON('/admin/users');
+  render();
+}
+
+function render() {
+  const q = document.getElementById('search').value.trim().toLowerCase();
+  const r = document.getElementById('role_filter').value;
+  const rows = users.filter(u => (!r || u.role === r) &&
+    (!q || [u.full_name, u.email, u.student_id].some(v => (v || '').toLowerCase().includes(q))));
+  document.getElementById('count').textContent = `(${rows.length}${rows.length !== users.length ? ' of ' + users.length : ''})`;
+
+  document.getElementById('rows').innerHTML = rows.length ? rows.map(u => {
+    const isMe = u.student_id === me;
+    const badge = u.status === 'pending'
+      ? '<span class="ml-2 px-2 py-0.5 rounded-full text-[11px] bg-yellow-900 text-yellow-300">Pending approval</span>'
+      : u.status === 'disabled' ? '<span class="ml-2 px-2 py-0.5 rounded-full text-[11px] bg-gray-700 text-gray-300">Disabled</span>' : '';
+    const id = esc(u.student_id);
+    return `<tr class="hover:bg-gray-800/50">
+      <td class="px-4 py-3"><div class="text-white font-medium">${esc(u.full_name || '—')}${isMe ? ' <span class="text-gray-500 text-xs">(you)</span>' : ''}${badge}</div>
+          <div class="text-gray-500 text-xs">${id}</div></td>
+      <td class="px-4 py-3 text-gray-300">${esc(u.email || '—')}</td>
+      <td class="px-4 py-3"><span class="px-2 py-0.5 rounded-full text-xs font-semibold ${ROLE_STYLE[u.role] || 'bg-gray-700 text-gray-300'}">${esc(u.role)}</span></td>
+      <td class="px-4 py-3 text-gray-400">${esc(fmtDate(u.created_at))}</td>
+      <td class="px-4 py-3 text-gray-400">${esc(ago(u.last_active))}</td>
+      <td class="px-4 py-3 text-right whitespace-nowrap">
+        ${u.status === 'pending' ? `<button data-approve="${id}" class="px-3 py-1 rounded-lg text-xs font-medium bg-green-700 hover:bg-green-600 text-white mr-1">Approve</button>` : ''}
+        <button data-delete="${id}" ${isMe ? 'disabled title="You cannot delete your own account"' : ''}
+          class="px-3 py-1 rounded-lg text-xs font-medium bg-red-700 hover:bg-red-600 text-white disabled:opacity-40 disabled:cursor-not-allowed">Delete</button>
+      </td></tr>`;
+  }).join('') : '<tr><td colspan="6" class="px-4 py-10 text-center text-gray-500">No users match.</td></tr>';
+}
+
+document.getElementById('search').addEventListener('input', render);
+document.getElementById('role_filter').addEventListener('change', render);
+
+document.getElementById('rows').addEventListener('click', async (e) => {
+  const approve = e.target.closest('[data-approve]');
+  const del     = e.target.closest('[data-delete]');
+  if (approve) {
+    try {
+      const r = await getJSON(`/admin/users/${encodeURIComponent(approve.dataset.approve)}/approve`, { method: 'POST' });
+      banner(r.message, 'ok');
+      await Promise.all([loadUsers(), loadStats()]);
+    } catch (err) { banner(err.message, 'err'); }
+  } else if (del && !del.disabled) {
+    askDelete(del.dataset.delete);
+  }
+});
+
+// ── delete with confirmation ───────────────────────────────────
+let pendingDelete = null;
+function askDelete(id) {
+  const u = users.find(x => x.student_id === id);
+  pendingDelete = id;
+  document.getElementById('confirm_who').textContent = u ? `${u.full_name || id} (${u.email || id}) · ${u.role}` : id;
+  document.getElementById('confirm').classList.remove('hidden');
+}
+function closeConfirm() { pendingDelete = null; document.getElementById('confirm').classList.add('hidden'); }
+document.getElementById('confirm_cancel').addEventListener('click', closeConfirm);
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeConfirm(); });
+document.getElementById('confirm_ok').addEventListener('click', async () => {
+  const id = pendingDelete;
+  if (!id) return;
+  const btn = document.getElementById('confirm_ok'); btn.disabled = true;
+  try {
+    const r = await getJSON(`/admin/users/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    const n = r.removed || {};
+    const bits = Object.entries(n).filter(([, v]) => v).map(([k, v]) => `${v} ${k}`).join(', ');
+    banner(`${r.message}${bits ? ' (removed ' + bits + ')' : ''}`, 'ok');
+    closeConfirm();
+    await Promise.all([loadUsers(), loadStats()]);
+  } catch (err) { closeConfirm(); banner(err.message, 'err'); }
+  btn.disabled = false;
+});
+
+// ── CSV export (authenticated download via blob) ───────────────
+document.getElementById('csv_btn').addEventListener('click', async () => {
+  const btn = document.getElementById('csv_btn'); btn.disabled = true;
+  try {
+    const res = await request('/admin/users/export.csv');
+    const blob = await res.blob();
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `users-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  } catch (err) { banner(err.message, 'err'); }
+  btn.disabled = false;
+});
+
+// ── boot ───────────────────────────────────────────────────────
+if (token && role === 'admin') {
+  Promise.allSettled([loadStats(), loadUsers()]).then(rs => {
+    const f = rs.find(r => r.status === 'rejected');
+    if (f) banner(f.reason.message, 'err');
+  });
+}
+</script>
+</body>
+</html>

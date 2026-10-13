@@ -107,6 +107,68 @@ class StudentControl(Base):
     set_at           = Column(DateTime, nullable=True)
 
 
+class Classroom(Base):
+    """A class = Semester -> Course -> Section, owned by one teacher."""
+    __tablename__ = "classrooms"
+
+    id                   = Column(Integer, primary_key=True, index=True)
+    teacher_id           = Column(String(50), ForeignKey("users.student_id"), index=True)
+    semester             = Column(String(50))
+    course_name          = Column(String(120))
+    section              = Column(String(50))
+    class_code           = Column(String(8), unique=True, index=True)
+    ai_detection_enabled = Column(Boolean, default=True)
+    created_at           = Column(DateTime, server_default=func.now())
+
+
+class ClassMember(Base):
+    __tablename__ = "class_members"
+    __table_args__ = (UniqueConstraint("class_id", "student_id", name="uq_class_member"),)
+
+    id         = Column(Integer, primary_key=True, index=True)
+    class_id   = Column(Integer, ForeignKey("classrooms.id"), index=True)
+    student_id = Column(String(50), ForeignKey("users.student_id"), index=True)
+    joined_at  = Column(DateTime, server_default=func.now())
+
+
+class ClassInviteLink(Base):
+    """Shareable join link (/join/<token>); valid 7 days."""
+    __tablename__ = "class_invite_links"
+
+    id         = Column(Integer, primary_key=True, index=True)
+    class_id   = Column(Integer, ForeignKey("classrooms.id"), index=True)
+    token      = Column(String(64), unique=True, index=True)
+    created_by = Column(String(50), ForeignKey("users.student_id"), nullable=True)
+    created_at = Column(DateTime, server_default=func.now())
+    expires_at = Column(DateTime)
+
+
+class ClassInvitation(Base):
+    """Invitation sent to one specific student (shown in their bell)."""
+    __tablename__ = "class_invitations"
+
+    id           = Column(Integer, primary_key=True, index=True)
+    class_id     = Column(Integer, ForeignKey("classrooms.id"), index=True)
+    student_id   = Column(String(50), ForeignKey("users.student_id"), index=True)
+    invited_by   = Column(String(50), ForeignKey("users.student_id"), nullable=True)
+    status       = Column(String(10), default="pending")   # pending | accepted | declined
+    created_at   = Column(DateTime, server_default=func.now())
+    expires_at   = Column(DateTime)
+    responded_at = Column(DateTime, nullable=True)
+
+
+class LabSession(Base):
+    """A monitoring session a teacher starts for one class."""
+    __tablename__ = "lab_sessions"
+
+    id         = Column(Integer, primary_key=True, index=True)
+    class_id   = Column(Integer, ForeignKey("classrooms.id"), index=True)
+    started_by = Column(String(50), ForeignKey("users.student_id"), nullable=True)
+    started_at = Column(DateTime, server_default=func.now())   # DB clock (matches submission.timestamp)
+    ended_at   = Column(DateTime, nullable=True)
+    is_active  = Column(Boolean, default=True)
+
+
 class OTPCode(Base):
     __tablename__ = "otp_codes"
 
