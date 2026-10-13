@@ -10,6 +10,7 @@ const CONFIG = {
     SERVER_PORT:               443,
     SNAPSHOT_INTERVAL_MS:      60000,   // Send code every 60 seconds
     HEARTBEAT_INTERVAL_MS:     30000,   // Heartbeat every 30 seconds
+    LAB_STATUS_INTERVAL_MS:    30000,   // Ask the server if a lab is running
     IDLE_TIMEOUT_MS:           60000,   // 60 seconds no typing = idle
     PASTE_CHAR_THRESHOLD:      10,      // 10+ chars at once = paste
     RAPID_TAB_COUNT:           3,       // 3 switches = suspicious
@@ -69,6 +70,9 @@ let kpmSamples            = [];                 // Feature: Keys Per Minute Over
 let kpmTimer              = null;
 let pauseEvents           = [];                 // Feature: Typing Pause Patterns
 let freezeTimer           = null;               // Feature: Screen Freeze Detection
+let labTimer              = null;               // Polls /student/lab-status
+let examMode              = false;              // true while the student's class has a lab running
+let activeLab             = null;               // { id, course_name, section, ... } from the server
 let lastActivityAt        = null;
 let lastCursorLine        = null;               // Feature: Sudden Code Jump
 let codeJumpCount         = 0;
@@ -672,6 +676,8 @@ function startMonitoring() {
     heartbeatTimer = setInterval(sendHeartbeat, CONFIG.HEARTBEAT_INTERVAL_MS);
     kpmTimer       = setInterval(sampleKeysPerMinute, CONFIG.KPM_SAMPLE_INTERVAL_MS);
     freezeTimer    = setInterval(checkScreenFreeze, CONFIG.FREEZE_CHECK_INTERVAL_MS);
+    labTimer       = setInterval(pollLabStatus, CONFIG.LAB_STATUS_INTERVAL_MS);
+    pollLabStatus();   // don't wait 30s to learn a lab is already running
     resetIdleTimer();
 }
 
@@ -680,8 +686,11 @@ function stopMonitoring() {
     clearInterval(heartbeatTimer);
     clearInterval(kpmTimer);
     clearInterval(freezeTimer);
+    clearInterval(labTimer);
     clearTimeout(idleTimer);
-    snapshotTimer = heartbeatTimer = kpmTimer = freezeTimer = idleTimer = null;
+    snapshotTimer = heartbeatTimer = kpmTimer = freezeTimer = idleTimer = labTimer = null;
+    examMode  = false;
+    activeLab = null;
 }
 
 function resetBehavioralState() {
@@ -943,6 +952,83 @@ function countOccurrences(haystack, needle) {
         pos += needle.length;
     }
     return count;
+}
+
+// ══════════════════════════════════════════════════════════════
+// LAB STATUS / EXAM MODE — follows the teacher's "Start Lab" / "End Lab"
+// ══════════════════════════════════════════════════════════════
+// GET a JSON endpoint with the JWT. Resolves null on any failure so a
+// network blip never flips exam mode by accident.
+function getFromServer(endpoint) {
+    return new Promise((resolve) => {
+        const headers = {};
+        if (jwtToken) headers['Authorization'] = `Bearer ${jwtToken}`;
+
+        const req = https.request({
+            hostname: CONFIG.SERVER_HOST,
+            port:     CONFIG.SERVER_PORT,
+            path:     endpoint,
+            method:   'GET',
+            headers:  headers,
+        }, (res) => {
+            let body = '';
+            res.on('data', (chunk) => body += chunk);
+            res.on('end', () => {
+                if (res.statusCode !== 200) return resolve(null);
+                try { resolve(JSON.parse(body)); } catch (e) { resolve(null); }
+            });
+            res.on('error', () => resolve(null));
+        });
+        req.on('error', () => resolve(null));
+        req.setTimeout(5000, () => { req.destroy(); resolve(null); });
+        req.end();
+    });
+}
+
+function refreshStatusBar() {
+    if (!isConnected) return;
+    updateStatusBar(isIdle ? 'idle' : (isWindowFocused ? 'connected' : 'suspicious'));
+}
+
+function enableExamMode(lab) {
+    examMode  = true;
+    activeLab = lab || null;
+    refreshStatusBar();
+    const where = lab ? `${lab.course_name} · Section ${lab.section}` : 'your class';
+    vscode.window.showInformationMessage(`📝 Exam mode ON — lab started for ${where}.`);
+    sendToServer('/student/event', {
+        student_id: studentId,
+        event_type: 'EXAM_MODE_ENABLED',
+        severity:   'INFO',
+        details:    { lab_id: lab ? lab.id : null, course: lab ? lab.course_name : null },
+        timestamp:  new Date().toISOString(),
+    });
+}
+
+function disableExamMode() {
+    const lab = activeLab;
+    examMode  = false;
+    activeLab = null;
+    refreshStatusBar();
+    vscode.window.showInformationMessage('✅ Exam mode OFF — the lab has ended.');
+    sendToServer('/student/event', {
+        student_id: studentId,
+        event_type: 'EXAM_MODE_DISABLED',
+        severity:   'INFO',
+        details:    { lab_id: lab ? lab.id : null },
+        timestamp:  new Date().toISOString(),
+    });
+}
+
+async function pollLabStatus() {
+    if (!isConnected || !jwtToken) return;
+    const status = await getFromServer('/student/lab-status');
+    // Ignore failures and replies that arrive after logout.
+    if (!status || typeof status.active !== 'boolean' || !isConnected) return;
+
+    if (status.active && !examMode)       enableExamMode(status.lab);
+    else if (!status.active && examMode)  disableExamMode();
+    else if (status.active)               activeLab = status.lab || activeLab;
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -1278,10 +1364,11 @@ function addSuspiciousScore(points, reason) {
 function updateStatusBar(status) {
     if (!statusBarItem) return;
     const score = isConnected ? ` | ⚠️${suspiciousScore}/100` : '';
+    const exam  = (isConnected && examMode) ? ' 📝 EXAM' : '';
 
     switch (status) {
         case 'connected':
-            statusBarItem.text    = `$(check) Monitor: ${studentId}${score}`;
+            statusBarItem.text    = `$(check) Monitor: ${studentId}${score}${exam}`;
             statusBarItem.color   = '#4CAF50';
             statusBarItem.tooltip = 'Connected — Click for status';
             statusBarItem.command = 'code-monitor.status';
@@ -1298,13 +1385,13 @@ function updateStatusBar(status) {
             statusBarItem.tooltip = 'Checking credentials...';
             break;
         case 'suspicious':
-            statusBarItem.text    = `$(warning) Monitor: ${studentId}${score}`;
+            statusBarItem.text    = `$(warning) Monitor: ${studentId}${score}${exam}`;
             statusBarItem.color   = '#FF9800';
             statusBarItem.tooltip = 'Suspicious activity detected!';
             statusBarItem.command = 'code-monitor.status';
             break;
         case 'idle':
-            statusBarItem.text    = `$(clock) Monitor: ${studentId} 💤 Idle`;
+            statusBarItem.text    = `$(clock) Monitor: ${studentId} 💤 Idle${exam}`;
             statusBarItem.color   = '#9E9E9E';
             statusBarItem.tooltip = 'You appear idle!';
             statusBarItem.command = 'code-monitor.status';
