@@ -12,7 +12,7 @@ from .database import get_db
 
 router = APIRouter(tags=["teacher"])
 
-HEARTBEAT_TIMEOUT_S = 30  # same liveness rule as /admin/all-students
+HEARTBEAT_TIMEOUT_S = 90  # same liveness rule as /admin/all-students (extension beats every 30s)
 SUSPICIOUS_THRESHOLD = 50  # same cut-off as /admin/flagged
 
 

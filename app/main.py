@@ -91,6 +91,10 @@ app.include_router(export_router)
 
 logger = logging.getLogger("screening")
 
+# A student counts as online if their last heartbeat is newer than this. The
+# extension heartbeats every 30s, so allow ~3 missed beats before "offline".
+HEARTBEAT_TIMEOUT_S = 90
+
 
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception):
@@ -642,7 +646,7 @@ def my_status(
 
     if session.last_heartbeat:
         seconds_since = (datetime.utcnow() - session.last_heartbeat).total_seconds()
-        if seconds_since < 30:
+        if seconds_since < HEARTBEAT_TIMEOUT_S:
             actually_connected = True
             if not session.is_connected:
                 session.is_connected = True
@@ -1032,7 +1036,7 @@ def get_all_students(db: Session = Depends(get_db), admin = Depends(auth.get_adm
 
             if session.is_connected and session.last_heartbeat:
                 diff = datetime.utcnow() - session.last_heartbeat
-                if diff.total_seconds() < 30:
+                if diff.total_seconds() < HEARTBEAT_TIMEOUT_S:
                     actually_connected = True
 
         paste_count = db.query(models.StudentEvent).filter(
