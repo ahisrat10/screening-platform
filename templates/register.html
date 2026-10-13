@@ -29,11 +29,6 @@
       <button type="button" id="seg_teacher" class="seg-btn py-2 rounded-lg text-sm font-semibold" aria-pressed="false" onclick="setRole('teacher')">👩‍🏫 Teacher</button>
     </div>
 
-    <div id="teacher_note" class="hidden mb-4 p-3 rounded-lg text-xs bg-yellow-900/40 border border-yellow-800 text-yellow-200">
-      Teacher accounts can view students' code and activity, so an administrator must approve yours
-      before you can sign in.
-    </div>
-
     <div id="message" class="hidden mb-4 p-3 rounded-lg text-sm font-medium" role="alert"></div>
 
     <form id="reg_form" class="space-y-4" novalidate>
@@ -123,7 +118,6 @@ function setRole(r) {
   document.getElementById('seg_teacher').setAttribute('aria-pressed', r === 'teacher');
   document.getElementById('title').textContent = r === 'student' ? 'Create student account' : 'Create teacher account';
   document.getElementById('sid_wrap').classList.toggle('hidden', r === 'teacher');
-  document.getElementById('teacher_note').classList.toggle('hidden', r !== 'teacher');
   hideMessage();
 }
 
@@ -160,9 +154,10 @@ async function register() {
     const data = await res.json();
 
     if (res.ok) {
-      showMessage('✅ ' + data.message + (role === 'student' ? ' Redirecting to sign in…' : ''), 'success');
-      if (role === 'student') setTimeout(() => window.location.href = '/', 2000);
-      return;                      // teachers stay on the page to read the approval note
+      showMessage('✅ ' + data.message + ' Redirecting to sign in…', 'success');
+      try { localStorage.setItem('login_role', role); } catch (e) {}   // pre-select the right toggle on the login page
+      setTimeout(() => window.location.href = '/', role === 'teacher' ? 3500 : 2000);
+      return;
     }
     showMessage('❌ ' + errorMessage(data, 'Registration failed'), 'error');
   } catch (err) {

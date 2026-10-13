@@ -160,8 +160,6 @@ def register(data: schemas.RegisterRequest, db: Session = Depends(get_db)):
         if db.query(models.User).filter(models.User.student_id == login_id).first():
             raise HTTPException(status_code=400, detail="Student ID already registered")
 
-    # Teacher accounts can see students' code and behaviour, so they are NOT
-    # usable until an admin approves them (is_active=False until then).
     is_teacher = data.role == "teacher"
     user = models.User(
         student_id    = login_id,
@@ -169,15 +167,15 @@ def register(data: schemas.RegisterRequest, db: Session = Depends(get_db)):
         full_name     = data.full_name,
         password_hash = auth.hash_password(data.password),
         role          = data.role,
-        is_active     = not is_teacher,
+        is_active     = True,
     )
     db.add(user)
     db.commit()
 
     if is_teacher:
         return {
-            "message": f"Teacher account created for {data.full_name}. An administrator must "
-                       f"approve it before you can log in. Your login ID: {login_id}",
+            "message": f"Teacher account created for {data.full_name}! You can sign in now "
+                       f"with your email or your login ID: {login_id}",
             "success": True,
         }
     send_welcome_email(data.email, data.student_id, data.full_name)
@@ -265,9 +263,7 @@ def login(data: schemas.LoginRequest, db: Session = Depends(get_db)):
 
     # Checked only after the password is verified, so it can't be used to probe accounts.
     if not user.is_active:
-        detail = ("Your teacher account is waiting for administrator approval."
-                  if user.role == "teacher" else "This account has been deactivated.")
-        raise HTTPException(status_code=403, detail=detail)
+        raise HTTPException(status_code=403, detail="This account has been deactivated.")
     if data.role and user.role in ("student", "teacher") and data.role != user.role:
         raise HTTPException(
             status_code=403,

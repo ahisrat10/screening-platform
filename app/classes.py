@@ -486,8 +486,6 @@ def _last_active_map(db: Session) -> dict:
 
 
 def _status(u: models.User) -> str:
-    if u.role == "teacher" and not u.is_active:
-        return "pending"
     return "active" if u.is_active else "disabled"
 
 
@@ -538,8 +536,6 @@ def db_stats(db: Session = Depends(get_db), admin=Depends(auth.get_admin_user)):
     return {
         "total_users":       sum(by_role.values()),
         "users_by_role":     {r: by_role.get(r, 0) for r in ("student", "teacher", "admin")},
-        "pending_teachers":  db.query(models.User).filter(
-            models.User.role == "teacher", models.User.is_active == False).count(),  # noqa: E712
         "total_sessions":    db.query(models.StudentSession).count(),
         "total_submissions": db.query(models.Submission).count(),
         "code_snapshots":    db.query(models.CodeSnapshot).count(),
@@ -547,18 +543,6 @@ def db_stats(db: Session = Depends(get_db), admin=Depends(auth.get_admin_user)):
         "classes":           db.query(models.Classroom).count(),
         "lab_sessions":      db.query(models.LabSession).count(),
     }
-
-
-@router.post("/admin/users/{user_id}/approve")
-def approve_teacher(user_id: str, db: Session = Depends(get_db), admin=Depends(auth.get_admin_user)):
-    u = db.query(models.User).filter(models.User.student_id == user_id).first()
-    if not u:
-        raise HTTPException(status_code=404, detail="User not found")
-    if u.role != "teacher":
-        raise HTTPException(status_code=400, detail="Only teacher accounts need approval")
-    u.is_active = True
-    db.commit()
-    return {"message": f"{u.full_name or user_id} approved", "success": True}
 
 
 def _count(q) -> int:

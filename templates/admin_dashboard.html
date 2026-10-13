@@ -46,8 +46,8 @@
       <p id="st_snaps" class="text-gray-500 text-xs mt-1"></p>
     </div>
     <div class="bg-gray-900 rounded-xl p-4 border border-purple-800">
-      <p class="text-gray-400 text-xs mb-1">Pending teachers</p>
-      <p id="st_pending" class="text-3xl font-bold text-purple-400">—</p>
+      <p class="text-gray-400 text-xs mb-1">Classes</p>
+      <p id="st_classes" class="text-3xl font-bold text-purple-400">—</p>
       <p id="st_labels" class="text-gray-500 text-xs mt-1"></p>
     </div>
   </section>
@@ -178,7 +178,7 @@ async function loadStats() {
   set('st_labs', `${s.lab_sessions} lab sessions · ${s.classes} classes`);
   set('st_subs', s.total_submissions);
   set('st_snaps', `${s.code_snapshots} code snapshots`);
-  set('st_pending', s.pending_teachers);
+  set('st_classes', s.classes);
   set('st_labels', `${s.teacher_labels} teacher labels`);
 }
 
@@ -199,9 +199,8 @@ function render() {
 
   document.getElementById('rows').innerHTML = rows.length ? rows.map(u => {
     const isMe = u.student_id === me;
-    const badge = u.status === 'pending'
-      ? '<span class="ml-2 px-2 py-0.5 rounded-full text-[11px] bg-yellow-900 text-yellow-300">Pending approval</span>'
-      : u.status === 'disabled' ? '<span class="ml-2 px-2 py-0.5 rounded-full text-[11px] bg-gray-700 text-gray-300">Disabled</span>' : '';
+    const badge = u.status === 'disabled'
+      ? '<span class="ml-2 px-2 py-0.5 rounded-full text-[11px] bg-gray-700 text-gray-300">Disabled</span>' : '';
     const id = esc(u.student_id);
     return `<tr class="hover:bg-gray-800/50">
       <td class="px-4 py-3"><div class="text-white font-medium">${esc(u.full_name || '—')}${isMe ? ' <span class="text-gray-500 text-xs">(you)</span>' : ''}${badge}</div>
@@ -211,7 +210,6 @@ function render() {
       <td class="px-4 py-3 text-gray-400">${esc(fmtDate(u.created_at))}</td>
       <td class="px-4 py-3 text-gray-400">${esc(ago(u.last_active))}</td>
       <td class="px-4 py-3 text-right whitespace-nowrap">
-        ${u.status === 'pending' ? `<button data-approve="${id}" class="px-3 py-1 rounded-lg text-xs font-medium bg-green-700 hover:bg-green-600 text-white mr-1">Approve</button>` : ''}
         <button data-delete="${id}" ${isMe ? 'disabled title="You cannot delete your own account"' : ''}
           class="px-3 py-1 rounded-lg text-xs font-medium bg-red-700 hover:bg-red-600 text-white disabled:opacity-40 disabled:cursor-not-allowed">Delete</button>
       </td></tr>`;
@@ -222,15 +220,8 @@ document.getElementById('search').addEventListener('input', render);
 document.getElementById('role_filter').addEventListener('change', render);
 
 document.getElementById('rows').addEventListener('click', async (e) => {
-  const approve = e.target.closest('[data-approve]');
-  const del     = e.target.closest('[data-delete]');
-  if (approve) {
-    try {
-      const r = await getJSON(`/admin/users/${encodeURIComponent(approve.dataset.approve)}/approve`, { method: 'POST' });
-      banner(r.message, 'ok');
-      await Promise.all([loadUsers(), loadStats()]);
-    } catch (err) { banner(err.message, 'err'); }
-  } else if (del && !del.disabled) {
+  const del = e.target.closest('[data-delete]');
+  if (del && !del.disabled) {
     askDelete(del.dataset.delete);
   }
 });
