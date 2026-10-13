@@ -83,18 +83,33 @@ class LoginRequest(BaseModel):
     role:       Optional[str] = None   # UI toggle; checked after the password
 
 class ForgotPasswordRequest(BaseModel):
-    student_id: str
+    # Email is enough; student_id is still accepted (older clients send both).
     email:      EmailStr
+    student_id: Optional[str] = None
 
 class VerifyOTPRequest(BaseModel):
-    student_id: str
     otp_code:   str
+    email:      Optional[EmailStr] = None
+    student_id: Optional[str] = None
+
+    @model_validator(mode='after')
+    def needs_account(self):
+        if not self.email and not self.student_id:
+            raise ValueError('email is required')
+        return self
 
 class ResetPasswordRequest(BaseModel):
-    student_id:       str
+    student_id:       Optional[str] = None
+    email:            Optional[EmailStr] = None
     otp_code:         str
     new_password:     str
     confirm_password: str
+
+    @model_validator(mode='after')
+    def needs_account(self):
+        if not self.email and not self.student_id:
+            raise ValueError('email is required')
+        return self
 
     @field_validator('new_password')
     def validate_password(cls, v):
@@ -181,6 +196,9 @@ class WarnRequest(BaseModel):
         if not v or len(v) > 500:
             raise ValueError('message must be 1-500 characters')
         return v
+
+class ResetDatabaseRequest(BaseModel):
+    confirm: str          # must be exactly "RESET"
 
 class AssignStudentsRequest(BaseModel):
     teacher_id:  str

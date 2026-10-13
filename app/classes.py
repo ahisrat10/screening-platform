@@ -440,6 +440,29 @@ def decline_invitation(invitation_id: int, db: Session = Depends(get_db), user=D
     return {"message": "Invitation declined", "success": True}
 
 
+@router.get("/student/lab-status")
+def my_lab_status(db: Session = Depends(get_db), user=Depends(auth.get_current_user)):
+    """Is a lab running for any class this student is in? (polled by the extension)"""
+    if user.role != "student":
+        return {"active": False, "lab": None, "ai_detection_enabled": True}
+    row = db.query(models.LabSession, models.Classroom).join(
+        models.Classroom, models.Classroom.id == models.LabSession.class_id
+    ).join(models.ClassMember, (models.ClassMember.class_id == models.Classroom.id) &
+           (models.ClassMember.student_id == user.student_id)).filter(
+        models.LabSession.is_active == True,  # noqa: E712
+    ).order_by(models.LabSession.id.desc()).first()
+    ai = ai_detection_allowed(db, user.student_id)
+    if not row:
+        return {"active": False, "lab": None, "ai_detection_enabled": ai}
+    lab, c = row
+    return {
+        "active": True,
+        "lab": {"id": lab.id, "class_id": c.id, "course_name": c.course_name,
+                "section": c.section, "semester": c.semester, "started_at": str(lab.started_at)},
+        "ai_detection_enabled": ai,
+    }
+
+
 @router.get("/student/lab-sessions")
 def my_lab_history(db: Session = Depends(get_db), user=Depends(auth.get_current_user)):
     """Finished labs of the student's classes since they joined. `ai_score`

@@ -303,12 +303,20 @@ def _otp_record_failure(student_id: str):
     _otp_failures.setdefault(student_id, []).append(time.time())
 
 
+def _otp_account(db: Session, student_id: Optional[str], email: Optional[str]) -> Optional[str]:
+    """Which account an OTP request is about: the given ID, else the one that owns the email."""
+    if student_id:
+        return student_id
+    u = db.query(models.User).filter(models.User.email == email).first() if email else None
+    return u.student_id if u else None
+
+
 @app.post("/auth/forgot-password", response_model=schemas.MessageResponse)
 def forgot_password(data: schemas.ForgotPasswordRequest, db: Session = Depends(get_db)):
-    user = db.query(models.User).filter(
-        models.User.student_id == data.student_id,
-        models.User.email      == data.email
-    ).first()
+    q = db.query(models.User).filter(models.User.email == data.email)
+    if data.student_id:                       # older clients: ID and email must both match
+        q = q.filter(models.User.student_id == data.student_id)
+    user = q.first()
 
     # Same response whether or not the account exists (no account enumeration),
     # including when the email fails to send.
@@ -318,24 +326,26 @@ def forgot_password(data: schemas.ForgotPasswordRequest, db: Session = Depends(g
         return generic
 
     otp = generate_otp()
-    save_otp(data.student_id, data.email, otp, db)
-    if not send_otp_email(data.email, data.student_id, otp):
-        logger.error("Failed to send OTP email for %s", data.student_id)
+    save_otp(user.student_id, data.email, otp, db)
+    if not send_otp_email(data.email, user.student_id, otp):
+        logger.error("Failed to send OTP email for %s", user.student_id)
 
     return generic
 
 
 @app.post("/auth/verify-otp", response_model=schemas.MessageResponse)
 def verify_otp(data: schemas.VerifyOTPRequest, db: Session = Depends(get_db)):
-    _otp_check_locked(data.student_id)
+    acct = _otp_account(db, data.student_id, data.email)
+    key  = acct or f"email:{(data.email or '').lower()}"   # unknown emails are limited too
+    _otp_check_locked(key)
     record = db.query(models.OTPCode).filter(
-        models.OTPCode.student_id == data.student_id,
+        models.OTPCode.student_id == acct,
         models.OTPCode.otp_code   == data.otp_code,
         models.OTPCode.is_used    == False
-    ).first()
+    ).first() if acct else None
 
     if not record:
-        _otp_record_failure(data.student_id)
+        _otp_record_failure(key)
         raise HTTPException(status_code=400, detail="Invalid OTP code")
     if record.expires_at < datetime.utcnow():
         raise HTTPException(status_code=400, detail="OTP expired. Request a new one.")
@@ -345,19 +355,21 @@ def verify_otp(data: schemas.VerifyOTPRequest, db: Session = Depends(get_db)):
 
 @app.post("/auth/reset-password", response_model=schemas.MessageResponse)
 def reset_password(data: schemas.ResetPasswordRequest, db: Session = Depends(get_db)):
-    _otp_check_locked(data.student_id)
+    acct = _otp_account(db, data.student_id, data.email)
+    key  = acct or f"email:{(data.email or '').lower()}"
+    _otp_check_locked(key)
     record = db.query(models.OTPCode).filter(
-        models.OTPCode.student_id == data.student_id,
+        models.OTPCode.student_id == acct,
         models.OTPCode.otp_code   == data.otp_code,
         models.OTPCode.is_used    == False
-    ).first()
+    ).first() if acct else None
 
     if not record or record.expires_at < datetime.utcnow():
-        _otp_record_failure(data.student_id)
+        _otp_record_failure(key)
         raise HTTPException(status_code=400, detail="Invalid or expired OTP")
 
     user = db.query(models.User).filter(
-        models.User.student_id == data.student_id
+        models.User.student_id == acct
     ).first()
     if not user:
         raise HTTPException(status_code=404, detail="Account not found")
@@ -1192,6 +1204,47 @@ def export_dataset(
         media_type = "text/csv",
         headers    = {"Content-Disposition": f"attachment; filename={filename}"}
     )
+
+
+@app.post("/admin/reset-database")
+def reset_database(
+    data:  schemas.ResetDatabaseRequest,
+    db:    Session = Depends(get_db),
+    admin = Depends(auth.get_admin_user),
+):
+    """Clear live/session data. Keeps user accounts, classes, submissions,
+    behavioural data, profiles and teacher labels (labels lose their session link).
+    Requires the literal confirmation text so it can't be triggered by accident."""
+    if data.confirm != "RESET":
+        raise HTTPException(status_code=400, detail='Confirmation text must be exactly "RESET"')
+
+    M = models
+    removed = {}
+    try:
+        # Rows that point at the sessions being removed keep their data but lose the link.
+        db.query(M.TeacherLabel).filter(M.TeacherLabel.session_id.isnot(None)).update(
+            {"session_id": None}, synchronize_session=False)
+        db.query(M.Submission).filter(M.Submission.exam_session_id.isnot(None)).update(
+            {"exam_session_id": None}, synchronize_session=False)
+        db.query(M.BehavioralData).filter(M.BehavioralData.exam_session_id.isnot(None)).update(
+            {"exam_session_id": None}, synchronize_session=False)
+
+        for label, model in (("code_snapshots", M.CodeSnapshot), ("events", M.StudentEvent),
+                             ("heartbeats", M.Heartbeat), ("exam_sessions", M.ExamSession),
+                             ("sessions", M.StudentSession)):
+            removed[label] = db.query(model).delete(synchronize_session=False)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+
+    logger.warning("Database session data reset by %s: %s", admin.student_id, removed)
+    broadcast_event({
+        "type": "DATABASE_RESET", "severity": "INFO",
+        "message": f"Session data was reset by {admin.full_name or admin.student_id}",
+        "timestamp": datetime.utcnow().isoformat(),
+    })
+    return {"message": "Session data cleared. User accounts were kept.", "success": True, "removed": removed}
 
 
 @app.get("/admin/flagged")

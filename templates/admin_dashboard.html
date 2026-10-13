@@ -90,6 +90,20 @@
       </table>
     </div>
   </section>
+
+  <!-- Danger zone -->
+  <section class="bg-gray-900 rounded-xl border border-red-900/70">
+    <div class="p-4 flex items-center justify-between gap-4 flex-wrap">
+      <div class="max-w-2xl">
+        <h2 class="text-red-300 font-semibold">Danger zone</h2>
+        <p class="text-gray-400 text-sm mt-1">
+          Reset session data clears all live sessions, code snapshots, events and heartbeats.
+          User accounts, classes, submissions and teacher labels are kept.
+        </p>
+      </div>
+      <button id="reset_btn" class="bg-red-700 hover:bg-red-600 text-white text-sm font-semibold px-4 py-2 rounded-lg">Reset Session Data</button>
+    </div>
+  </section>
 </main>
 
 <!-- Delete confirmation -->
@@ -107,6 +121,58 @@
       <button id="confirm_ok" class="px-4 py-2 rounded-lg text-sm bg-red-600 hover:bg-red-700 text-white font-medium">Delete permanently</button>
     </div>
   </div>
+</div>
+
+<!-- Reset: confirmation 1 of 2 -->
+<div id="reset1" class="hidden fixed inset-0 bg-black/75 flex items-center justify-center z-50 p-4">
+  <div class="bg-gray-900 rounded-2xl border border-red-800 w-full max-w-md p-6">
+    <p class="text-red-400 text-xs font-semibold uppercase tracking-wide">Confirmation 1 of 2</p>
+    <h3 class="text-white font-semibold text-lg mt-1">Reset all session data?</h3>
+    <div class="grid grid-cols-2 gap-3 mt-4 text-sm">
+      <div class="bg-red-950/40 border border-red-900 rounded-lg p-3">
+        <p class="text-red-300 font-medium mb-1">Will be deleted</p>
+        <ul class="text-gray-300 space-y-0.5 text-xs">
+          <li>Sessions <span id="r1_sessions" class="text-gray-500"></span></li>
+          <li>Code snapshots <span id="r1_snaps" class="text-gray-500"></span></li>
+          <li>Events</li><li>Heartbeats</li>
+        </ul>
+      </div>
+      <div class="bg-green-950/30 border border-green-900 rounded-lg p-3">
+        <p class="text-green-300 font-medium mb-1">Will be kept</p>
+        <ul class="text-gray-300 space-y-0.5 text-xs">
+          <li>User accounts</li><li>Classes &amp; lab history</li>
+          <li>Submissions</li><li>Teacher labels*</li>
+        </ul>
+      </div>
+    </div>
+    <p class="text-gray-500 text-xs mt-3">
+      *Labels stay but lose their link to the deleted session, so they won't appear in dataset exports.
+      Export the dataset first if you still need it. This cannot be undone.
+    </p>
+    <div class="flex justify-end gap-2 mt-5">
+      <button id="reset1_cancel" class="px-4 py-2 rounded-lg text-sm bg-gray-700 hover:bg-gray-600 text-white">Cancel</button>
+      <button id="reset1_next" class="px-4 py-2 rounded-lg text-sm bg-red-700 hover:bg-red-600 text-white font-medium">Continue</button>
+    </div>
+  </div>
+</div>
+
+<!-- Reset: confirmation 2 of 2 -->
+<div id="reset2" class="hidden fixed inset-0 bg-black/80 flex items-center justify-center z-[60] p-4">
+  <form id="reset2_form" class="bg-gray-900 rounded-2xl border border-red-700 w-full max-w-md p-6" autocomplete="off">
+    <p class="text-red-400 text-xs font-semibold uppercase tracking-wide">Confirmation 2 of 2</p>
+    <h3 class="text-white font-semibold text-lg mt-1">Type RESET to confirm</h3>
+    <p class="text-gray-400 text-sm mt-2">This permanently deletes all session data right now.</p>
+    <input id="reset_phrase" placeholder="RESET" aria-label="Type RESET to confirm"
+      class="mt-4 w-full bg-gray-800 text-white font-mono tracking-widest text-center border border-gray-700 rounded-lg px-3 py-2
+             focus:outline-none focus:border-red-500"/>
+    <div class="flex justify-end gap-2 mt-5">
+      <button type="button" id="reset2_cancel" class="px-4 py-2 rounded-lg text-sm bg-gray-700 hover:bg-gray-600 text-white">Cancel</button>
+      <button type="submit" id="reset2_go" disabled
+        class="px-4 py-2 rounded-lg text-sm bg-red-600 hover:bg-red-700 text-white font-semibold disabled:opacity-40 disabled:cursor-not-allowed">
+        Delete session data
+      </button>
+    </div>
+  </form>
 </div>
 
 <script>
@@ -236,7 +302,7 @@ function askDelete(id) {
 }
 function closeConfirm() { pendingDelete = null; document.getElementById('confirm').classList.add('hidden'); }
 document.getElementById('confirm_cancel').addEventListener('click', closeConfirm);
-document.addEventListener('keydown', e => { if (e.key === 'Escape') closeConfirm(); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeConfirm(); closeReset(); } });
 document.getElementById('confirm_ok').addEventListener('click', async () => {
   const id = pendingDelete;
   if (!id) return;
@@ -265,6 +331,40 @@ document.getElementById('csv_btn').addEventListener('click', async () => {
     setTimeout(() => URL.revokeObjectURL(a.href), 2000);
   } catch (err) { banner(err.message, 'err'); }
   btn.disabled = false;
+});
+
+// ── reset session data (two confirmations + typed phrase) ──────
+const r1 = document.getElementById('reset1'), r2 = document.getElementById('reset2');
+const phrase = document.getElementById('reset_phrase'), go = document.getElementById('reset2_go');
+function closeReset() { r1.classList.add('hidden'); r2.classList.add('hidden'); phrase.value = ''; go.disabled = true; }
+
+document.getElementById('reset_btn').addEventListener('click', async () => {
+  try {
+    const s = await getJSON('/admin/db-stats');
+    document.getElementById('r1_sessions').textContent = `(${s.total_sessions})`;
+    document.getElementById('r1_snaps').textContent = `(${s.code_snapshots})`;
+  } catch (e) {}
+  r1.classList.remove('hidden');
+});
+document.getElementById('reset1_cancel').addEventListener('click', closeReset);
+document.getElementById('reset2_cancel').addEventListener('click', closeReset);
+document.getElementById('reset1_next').addEventListener('click', () => {
+  r1.classList.add('hidden'); r2.classList.remove('hidden'); phrase.focus();
+});
+phrase.addEventListener('input', () => { go.disabled = phrase.value !== 'RESET'; });
+document.getElementById('reset2_form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  if (phrase.value !== 'RESET') return;
+  go.disabled = true;
+  try {
+    const r = await getJSON('/admin/reset-database', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ confirm: 'RESET' }),
+    });
+    const n = r.removed || {};
+    banner(`${r.message} Removed ${n.sessions || 0} sessions, ${n.code_snapshots || 0} snapshots, ${n.events || 0} events, ${n.heartbeats || 0} heartbeats.`, 'ok');
+    closeReset();
+    await Promise.all([loadUsers(), loadStats()]);
+  } catch (err) { closeReset(); banner(err.message, 'err'); }
 });
 
 // ── boot ───────────────────────────────────────────────────────
