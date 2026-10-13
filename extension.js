@@ -8,8 +8,8 @@ const https  = require('https');
 const CONFIG = {
     SERVER_HOST:               'screening-platform-production.up.railway.app',
     SERVER_PORT:               443,
-    SNAPSHOT_INTERVAL_MS:      30000,   // Send code every 30 seconds
-    HEARTBEAT_INTERVAL_MS:     10000,   // Heartbeat every 10 seconds
+    SNAPSHOT_INTERVAL_MS:      60000,   // Send code every 60 seconds
+    HEARTBEAT_INTERVAL_MS:     30000,   // Heartbeat every 30 seconds
     IDLE_TIMEOUT_MS:           60000,   // 60 seconds no typing = idle
     PASTE_CHAR_THRESHOLD:      10,      // 10+ chars at once = paste
     RAPID_TAB_COUNT:           3,       // 3 switches = suspicious
@@ -24,7 +24,7 @@ const CONFIG = {
     FREEZE_THRESHOLD_MS:       20000,   // focused + silent this long = freeze
     CODE_JUMP_LINE_THRESHOLD:  50,      // cursor moving >50 lines instantly
     LARGE_DELETION_THRESHOLD:  30,      // chars removed at once
-    KPM_SAMPLE_INTERVAL_MS:    15000,   // how often to sample keys/min
+    KPM_SAMPLE_INTERVAL_MS:    30000,   // how often to sample keys/min
     KEYSTROKE_HISTORY_LIMIT:   200,     // max intervals kept for stats
     SESSION_BREAK_THRESHOLD_MS: 120000, // 2 min silent = a "session break"
     SKILL_JUMP_SCORE_DELTA:    30,      // ai_score jump between snapshots
