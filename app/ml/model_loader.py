@@ -20,6 +20,14 @@ MODELS_DIR = os.path.join(os.path.dirname(__file__), "models")
 CODEBERT_DIR = os.path.join(MODELS_DIR, "codebert", "final_model")
 UNIXCODER_DIR = os.path.join(MODELS_DIR, "unixcoder", "final_model")
 
+# Fallback source when the local checkpoint folders aren't present (e.g. on
+# Railway, where the ~950MB of weights aren't shipped in the image).
+CODEBERT_HF_REPO = "ahisrat10/codebert-ai-detector"
+UNIXCODER_HF_REPO = "ahisrat10/unixcoder-ai-detector"
+
+# Only needed if those HF repos are private.
+HF_TOKEN = os.getenv("HF_TOKEN") or None
+
 TRANSFORMER_MAX_LENGTH = 512
 
 # Weight of the behavioral heuristic in the final ai_probability.
@@ -68,27 +76,44 @@ FUSION_FEATURE_NAMES = _load_pickle("feature_names.pkl")
 _TRANSFORMER_PLACEHOLDER = 0.5
 
 
-def _load_transformer(model_dir: str, name: str):
-    """Load a tokenizer + sequence-classification model from `model_dir`.
+def _has_local_checkpoint(model_dir: str) -> bool:
+    # A HF checkpoint dir needs at least a config and some weights file;
+    # just checking the directory exists isn't enough (e.g. an empty folder
+    # left behind by a partial git checkout).
+    if not os.path.isdir(model_dir):
+        return False
+    names = set(os.listdir(model_dir))
+    has_weights = any(n.endswith((".safetensors", ".bin")) for n in names)
+    return "config.json" in names and has_weights
 
-    Returns (tokenizer, model), or (None, None) if loading fails for any
-    reason (missing files, bad checkpoint, transformers not installed,
-    etc.) — callers fall back to _TRANSFORMER_PLACEHOLDER in that case.
+
+def _load_transformer(model_dir: str, hf_repo: str, name: str):
+    """Load a tokenizer + sequence-classification model.
+
+    Tries the local checkpoint folder first (local dev, where the weights
+    are on disk); if that isn't present, falls back to the model's HF Hub
+    repo (Railway, which doesn't ship the ~450MB weight files in the image).
+    Returns (tokenizer, model), or (None, None) if both fail — callers fall
+    back to _TRANSFORMER_PLACEHOLDER in that case.
     """
-    try:
-        from transformers import AutoModelForSequenceClassification, AutoTokenizer
+    from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
-        tokenizer = AutoTokenizer.from_pretrained(model_dir)
-        model = AutoModelForSequenceClassification.from_pretrained(model_dir)
+    source = model_dir if _has_local_checkpoint(model_dir) else hf_repo
+    if source is hf_repo:
+        logger.info("No local checkpoint at %s; loading %s from Hugging Face Hub (%s)", model_dir, name, hf_repo)
+
+    try:
+        tokenizer = AutoTokenizer.from_pretrained(source, token=HF_TOKEN)
+        model = AutoModelForSequenceClassification.from_pretrained(source, token=HF_TOKEN)
         model.eval()
         return tokenizer, model
     except Exception:
-        logger.warning("Failed to load %s model from %s; falling back to placeholder 0.5", name, model_dir, exc_info=True)
+        logger.warning("Failed to load %s model from %s; falling back to placeholder 0.5", name, source, exc_info=True)
         return None, None
 
 
-codebert_tokenizer, codebert_model = _load_transformer(CODEBERT_DIR, "CodeBERT")
-unixcoder_tokenizer, unixcoder_model = _load_transformer(UNIXCODER_DIR, "UniXcoder")
+codebert_tokenizer, codebert_model = _load_transformer(CODEBERT_DIR, CODEBERT_HF_REPO, "CodeBERT")
+unixcoder_tokenizer, unixcoder_model = _load_transformer(UNIXCODER_DIR, UNIXCODER_HF_REPO, "UniXcoder")
 
 
 def _transformer_prob(tokenizer, model, code: str) -> float:
