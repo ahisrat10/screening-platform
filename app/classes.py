@@ -14,7 +14,7 @@ import time
 from datetime import datetime, timedelta
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
 from pydantic import BaseModel, field_validator
 from sqlalchemy import func, or_
@@ -562,13 +562,33 @@ def _csv_safe(v) -> str:
     return "'" + s if s[:1] in ("=", "+", "-", "@", "\t", "\r") else s
 
 
+def _validate_date_filter(date: Optional[str]) -> Optional[str]:
+    """YYYY-MM-DD, or None. Raises 400 on a malformed OR invalid (e.g. month 99) value."""
+    if date is None:
+        return None
+    try:
+        datetime.strptime(date, "%Y-%m-%d")
+    except ValueError:
+        raise HTTPException(status_code=400, detail="date must be a valid date in YYYY-MM-DD format")
+    return date
+
+
 @router.get("/admin/users/export.csv")
-def admin_users_csv(db: Session = Depends(get_db), admin=Depends(auth.get_admin_user)):
+def admin_users_csv(
+    date: Optional[str] = Query(None, description="Filter by date, format YYYY-MM-DD"),
+    db: Session = Depends(get_db),
+    admin=Depends(auth.get_admin_user),
+):
+    date = _validate_date_filter(date)
     active = _last_active_map(db)
     buf = io.StringIO()
     w = csv.writer(buf)
     w.writerow(["user_id", "full_name", "email", "role", "status", "created_at", "last_active"])
-    for u in db.query(models.User).order_by(models.User.id).all():
+    query = db.query(models.User)
+    if date:
+        # The user's own timestamp column is created_at (registration date).
+        query = query.filter(func.date(models.User.created_at) == date)
+    for u in query.order_by(models.User.id).all():
         w.writerow([_csv_safe(u.student_id), _csv_safe(u.full_name), _csv_safe(u.email), u.role,
                     _status(u), u.created_at or "", active.get(u.student_id, "")])
     name = f"users-{datetime.utcnow().strftime('%Y-%m-%d')}.csv"

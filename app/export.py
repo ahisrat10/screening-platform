@@ -14,8 +14,9 @@ import time
 from datetime import datetime
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from . import auth, models
@@ -235,13 +236,31 @@ def _latest_labels(db: Session) -> dict:
     return latest
 
 
-def _export(db: Session, admin, labeled_only: bool) -> Response:
+def _validate_date_filter(date: Optional[str]) -> Optional[str]:
+    """YYYY-MM-DD, or None. Raises 400 on a malformed OR invalid (e.g. month 99) value."""
+    if date is None:
+        return None
+    try:
+        datetime.strptime(date, "%Y-%m-%d")
+    except ValueError:
+        raise HTTPException(status_code=400, detail="date must be a valid date in YYYY-MM-DD format")
+    return date
+
+
+def _export(db: Session, admin, labeled_only: bool, date: Optional[str] = None) -> Response:
     _check_rate_limit(admin.student_id)
+    date = _validate_date_filter(date)
 
     students = {u.student_id: u for u in db.query(models.User).filter(models.User.role == "student").all()}
-    sessions = db.query(models.StudentSession).filter(
-        models.StudentSession.student_id.in_(list(students.keys()))
-    ).order_by(models.StudentSession.id.asc()).all() if students else []
+    sessions = []
+    if students:
+        sess_q = db.query(models.StudentSession).filter(
+            models.StudentSession.student_id.in_(list(students.keys()))
+        )
+        if date:
+            # The session's timestamp is its connect time (StudentSession.connected_at).
+            sess_q = sess_q.filter(func.date(models.StudentSession.connected_at) == date)
+        sessions = sess_q.order_by(models.StudentSession.id.asc()).all()
     labels = _latest_labels(db)
 
     labeled_count = sum(1 for s in sessions if s.id in labels)
@@ -269,15 +288,17 @@ def _export(db: Session, admin, labeled_only: bool) -> Response:
 
 @router.get("/admin/export/dataset")
 def export_dataset_json(
+    date: Optional[str] = Query(None, description="Filter by date, format YYYY-MM-DD"),
     db: Session = Depends(get_db),
     admin = Depends(auth.get_admin_user),
 ):
-    return _export(db, admin, labeled_only=True)
+    return _export(db, admin, labeled_only=True, date=date)
 
 
 @router.get("/admin/export/all-sessions")
 def export_all_sessions(
+    date: Optional[str] = Query(None, description="Filter by date, format YYYY-MM-DD"),
     db: Session = Depends(get_db),
     admin = Depends(auth.get_admin_user),
 ):
-    return _export(db, admin, labeled_only=False)
+    return _export(db, admin, labeled_only=False, date=date)

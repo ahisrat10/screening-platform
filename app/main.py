@@ -1,5 +1,6 @@
 from fastapi import FastAPI, Depends, HTTPException, WebSocket, WebSocketDisconnect, Header, Query
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 from datetime import datetime
 from typing import List, Optional
@@ -1186,8 +1187,20 @@ def get_code(student_id: str, db: Session = Depends(get_db), admin = Depends(aut
     } for s in snapshots]
 
 
+def _validate_date_filter(date: Optional[str]) -> Optional[str]:
+    """YYYY-MM-DD, or None. Raises 400 on a malformed OR invalid (e.g. month 99) value."""
+    if date is None:
+        return None
+    try:
+        datetime.strptime(date, "%Y-%m-%d")
+    except ValueError:
+        raise HTTPException(status_code=400, detail="date must be a valid date in YYYY-MM-DD format")
+    return date
+
+
 @app.get("/admin/export-dataset")
 def export_dataset(
+    date:         Optional[str] = Query(None, description="Filter by date, format YYYY-MM-DD"),
     db:           Session = Depends(get_db),
     current_user = Depends(auth.get_admin_user)
 ):
@@ -1195,7 +1208,12 @@ def export_dataset(
     from .ml.feature_extractor import FEATURE_COLUMNS as CODE_FEATURE_COLUMNS
     import csv, io
 
-    submissions = db.query(models.Submission).order_by(models.Submission.id).all()
+    date = _validate_date_filter(date)
+
+    query = db.query(models.Submission)
+    if date:
+        query = query.filter(func.date(models.Submission.timestamp) == date)
+    submissions = query.order_by(models.Submission.id).all()
 
     header = (
         ["submission_id", "student_id", "language", "is_successful", "execution_time",
