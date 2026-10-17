@@ -200,6 +200,21 @@ class WarnRequest(BaseModel):
 class ResetDatabaseRequest(BaseModel):
     confirm: str          # must be exactly "RESET"
 
+class TeacherAIFeedbackRequest(BaseModel):
+    """Session-based quick agree/disagree with the AI-detection verdict
+    (teacher.html panel). Writes to correction_memory for later retraining."""
+    session_id:    int
+    student_id:    str
+    agreed:        bool
+    ai_prediction: str     # the model's prediction the teacher is reacting to
+
+    @field_validator('ai_prediction')
+    def normalize_prediction(cls, v):
+        v = (v or "").strip().lower()
+        if v not in ("ai", "human"):
+            raise ValueError('ai_prediction must be "AI" or "Human"')
+        return "AI" if v == "ai" else "Human"
+
 class AssignStudentsRequest(BaseModel):
     teacher_id:  str
     student_ids: list[str]

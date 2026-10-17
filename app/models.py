@@ -84,6 +84,7 @@ class ExamState(Base):
     ended_at   = Column(DateTime, nullable=True)
     started_by = Column(String(50), nullable=True)
     problem_id = Column(Integer, nullable=True)
+    class_id   = Column(Integer, ForeignKey("classrooms.id"), nullable=True)
 
 
 class StudentWarning(Base):
@@ -347,11 +348,20 @@ class CorrectionMemory(Base):
     __tablename__ = "correction_memory"
 
     id              = Column(Integer, primary_key=True, index=True)
-    code_hash       = Column(String(64), nullable=False, index=True)
+    # Nullable: the submission-code-hash flow (/teacher/submission-feedback)
+    # sets this; the session-based quick agree/disagree flow
+    # (/teacher/feedback) has no single code blob to hash, so it leaves this
+    # null and fills session_id/student_id/teacher_id/agreed instead.
+    code_hash       = Column(String(64), nullable=True, index=True)
     original_pred   = Column(String(10), nullable=True)
     corrected_label = Column(String(10), nullable=True)
     corrected_by    = Column(String(50), nullable=True)
     corrected_at    = Column(DateTime, server_default=func.now())
+
+    session_id      = Column(Integer, ForeignKey("student_sessions.id"), nullable=True)
+    student_id      = Column(String(50), ForeignKey("users.student_id"), nullable=True)
+    teacher_id      = Column(String(50), ForeignKey("users.student_id"), nullable=True)
+    agreed          = Column(Boolean, nullable=True)
 
 
 class Submission(Base):

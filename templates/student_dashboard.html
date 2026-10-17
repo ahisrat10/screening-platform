@@ -79,10 +79,14 @@
             <th class="px-4 py-3 font-medium">Class</th>
             <th class="px-4 py-3 font-medium">Duration</th>
             <th class="px-4 py-3 font-medium">AI score</th>
+            <th class="px-4 py-3 font-medium">Pastes</th>
+            <th class="px-4 py-3 font-medium">Tab switches</th>
+            <th class="px-4 py-3 font-medium">KPM</th>
+            <th class="px-4 py-3 font-medium">Suspicion</th>
           </tr>
         </thead>
         <tbody id="history" class="divide-y divide-gray-800">
-          <tr><td colspan="4" class="px-4 py-8 text-center text-gray-500">Loading…</td></tr>
+          <tr><td colspan="8" class="px-4 py-8 text-center text-gray-500">Loading…</td></tr>
         </tbody>
       </table>
     </div>
@@ -150,7 +154,9 @@ async function loadClasses() {
     return;
   }
   root.innerHTML = list.map(c => `
-    <article class="bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden hover:border-gray-600 transition">
+    <article onclick="window.location.href='/dashboard?class_id=${c.id}'"
+      class="bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden hover:border-gray-600
+             hover:shadow-lg hover:-translate-y-0.5 transition cursor-pointer">
       <div class="px-4 py-4" style="background:${colorFor(c.course_name)}">
         <h3 class="text-white font-bold text-lg leading-snug">${esc(c.course_name)}</h3>
         <p class="text-white/80 text-sm">Section ${esc(c.section)}</p>
@@ -236,6 +242,9 @@ function scoreBadge(s) {
   const cls = s >= 70 ? 'bg-red-900 text-red-300' : s >= 40 ? 'bg-yellow-900 text-yellow-300' : 'bg-green-900 text-green-300';
   return `<span class="px-2 py-0.5 rounded-full text-xs font-semibold ${cls}">${s.toFixed(1)}%</span>`;
 }
+function numCell(v, decimals = 0) {
+  return v == null ? '<span class="text-gray-600">—</span>' : Number(v).toFixed(decimals);
+}
 async function loadHistory() {
   const rows = await api('/student/lab-sessions');
   document.getElementById('history').innerHTML = rows.length ? rows.map(r => `
@@ -244,8 +253,12 @@ async function loadHistory() {
       <td class="px-4 py-3"><span class="text-white">${esc(r.course_name)}</span> <span class="text-gray-500">· Section ${esc(r.section)}</span></td>
       <td class="px-4 py-3 text-gray-300">${r.duration_minutes < 1 ? '< 1 min' : Math.round(r.duration_minutes) + ' min'}</td>
       <td class="px-4 py-3">${scoreBadge(r.ai_score)}</td>
+      <td class="px-4 py-3 text-yellow-400">${numCell(r.paste_count)}</td>
+      <td class="px-4 py-3 text-orange-400">${numCell(r.tab_switches)}</td>
+      <td class="px-4 py-3 text-gray-300">${numCell(r.typing_speed_kpm)}</td>
+      <td class="px-4 py-3 text-gray-300">${numCell(r.suspicious_score)}</td>
     </tr>`).join('')
-    : '<tr><td colspan="4" class="px-4 py-8 text-center text-gray-500">No finished lab sessions yet.</td></tr>';
+    : '<tr><td colspan="8" class="px-4 py-8 text-center text-gray-500">No finished lab sessions yet.</td></tr>';
 }
 
 // ── boot ───────────────────────────────────────────────────────

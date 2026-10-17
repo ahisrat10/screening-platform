@@ -485,6 +485,22 @@ def my_lab_history(db: Session = Depends(get_db), user=Depends(auth.get_current_
             models.Submission.timestamp >= lab.started_at,
             models.Submission.timestamp <= lab.ended_at,
         ).order_by(models.Submission.timestamp.desc(), models.Submission.id.desc()).first()
+
+        # Latest behavioral telemetry recorded during this lab's time window
+        # (NOT the student's live/current StudentSession — this row is history).
+        beh = db.query(models.BehavioralData).filter(
+            models.BehavioralData.student_id == user.student_id,
+            models.BehavioralData.created_at >= lab.started_at,
+            models.BehavioralData.created_at <= lab.ended_at,
+        ).order_by(models.BehavioralData.created_at.desc(), models.BehavioralData.id.desc()).first()
+        raw = (beh.raw_events if beh and isinstance(beh.raw_events, dict) else {}) or {}
+
+        def _first(*values):
+            for v in values:
+                if v is not None:
+                    return v
+            return None
+
         out.append({
             "id": lab.id, "course_name": c.course_name, "section": c.section, "semester": c.semester,
             "date": lab.started_at.date().isoformat(),
@@ -492,6 +508,13 @@ def my_lab_history(db: Session = Depends(get_db), user=Depends(auth.get_current_
             "duration_minutes": round((lab.ended_at - lab.started_at).total_seconds() / 60, 1),
             "ai_score": round(sub.ai_probability * 100, 1) if sub else None,
             "ai_prediction": sub.ai_prediction if sub else None,
+            # Behavioral signals recorded during this specific lab (null if no
+            # telemetry was ever sent during that window).
+            "paste_count":      _first(raw.get("total_pastes"), raw.get("paste_count")),
+            "tab_switches":     _first(raw.get("total_tab_switches"), beh.tab_switch_count if beh else None),
+            "backspace_freq":   beh.backspace_frequency if beh else None,
+            "typing_speed_kpm": beh.keys_per_minute if beh else None,
+            "suspicious_score": beh.suspicion_score if beh else None,
         })
     return out
 

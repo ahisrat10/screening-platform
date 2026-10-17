@@ -17,6 +17,33 @@ from .email_service import generate_otp, save_otp, send_otp_email, send_welcome_
 
 models.Base.metadata.create_all(bind=engine)
 
+# ── lightweight column migrations ───────────────────────────────
+# create_all() only creates missing TABLES — it never alters an existing
+# table's columns. This project has no Alembic, so new columns on tables
+# that already existed in production (exam_state, correction_memory) are
+# added here, once, idempotently, on startup instead.
+def _run_light_migrations(engine):
+    from sqlalchemy import text
+    statements = [
+        "ALTER TABLE exam_state ADD COLUMN IF NOT EXISTS class_id INTEGER REFERENCES classrooms(id)",
+        "ALTER TABLE correction_memory ALTER COLUMN code_hash DROP NOT NULL",
+        "ALTER TABLE correction_memory ADD COLUMN IF NOT EXISTS session_id INTEGER REFERENCES student_sessions(id)",
+        "ALTER TABLE correction_memory ADD COLUMN IF NOT EXISTS student_id VARCHAR(50) REFERENCES users(student_id)",
+        "ALTER TABLE correction_memory ADD COLUMN IF NOT EXISTS teacher_id VARCHAR(50) REFERENCES users(student_id)",
+        "ALTER TABLE correction_memory ADD COLUMN IF NOT EXISTS agreed BOOLEAN",
+    ]
+    # AUTOCOMMIT + one connection per statement: a failed ALTER (e.g. on a
+    # non-Postgres dev DB) must not abort the transaction for the rest.
+    with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
+        for stmt in statements:
+            try:
+                conn.execute(text(stmt))
+            except Exception:
+                logging.getLogger("screening").warning("Migration statement failed (non-fatal): %s", stmt, exc_info=True)
+
+
+_run_light_migrations(engine)
+
 # ══════════════════════════════════════════════════════════════
 # WEBSOCKET MANAGER
 # ══════════════════════════════════════════════════════════════
@@ -679,7 +706,8 @@ def my_status(
             "suspicious_score": 0,
             "last_heartbeat":   None,
             "connected_at":     None,
-            "stats":            None
+            "stats":            None,
+            "teacher_label":    None,
         }
 
     # ── Heartbeat timeout check ────────────────────────────────
@@ -719,6 +747,10 @@ def my_status(
         models.CodeSnapshot.student_id == student_id
     ).count()
 
+    latest_label = db.query(models.TeacherLabel).filter(
+        models.TeacherLabel.session_id == session.id
+    ).order_by(models.TeacherLabel.created_at.desc(), models.TeacherLabel.id.desc()).first()
+
     return {
         "is_connected":     actually_connected,
         "suspicious_score": session.suspicious_score,
@@ -730,7 +762,14 @@ def my_status(
             "paste_count":  paste_count,
             "tab_switches": tab_count,
             "snapshots":    snap_count,
-        }
+        },
+        # Most recent teacher evaluation of the student's CURRENT session
+        # (dashboard.html polls this to toast "Teacher evaluated your session").
+        "teacher_label": {
+            "id":         latest_label.id,
+            "label":      latest_label.label,
+            "confidence": latest_label.confidence,
+        } if latest_label else None,
     }
 
 # ══════════════════════════════════════════════════════════════
@@ -857,10 +896,14 @@ def analyze_ai_detection(
     return result
 
 # ══════════════════════════════════════════════════════════════
-# TEACHER FEEDBACK ROUTE
+# TEACHER FEEDBACK ROUTE (per-submission AI/Human correction)
+# NOTE: renamed from /teacher/feedback -> /teacher/submission-feedback.
+# /teacher/feedback is now the session-based quick agree/disagree endpoint
+# in classes.py (teacher.html's "Agree/Disagree with AI" buttons). No
+# template referenced the old path, so nothing else needed to change.
 # ══════════════════════════════════════════════════════════════
 
-@app.post("/teacher/feedback", response_model=schemas.TeacherFeedbackResponse)
+@app.post("/teacher/submission-feedback", response_model=schemas.TeacherFeedbackResponse)
 def submit_teacher_feedback(
     data:         schemas.TeacherFeedbackRequest,
     db:           Session = Depends(get_db),

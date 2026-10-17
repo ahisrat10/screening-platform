@@ -1,15 +1,17 @@
 from datetime import datetime
 from typing import Optional
 
+import logging
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException
 from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
 
 from . import auth, models, schemas
 from .database import get_db
 
+logger = logging.getLogger("screening.teacher")
 router = APIRouter(tags=["teacher"])
 
 HEARTBEAT_TIMEOUT_S = 90  # same liveness rule as /admin/all-students (extension beats every 30s)
@@ -135,7 +137,18 @@ def _exam_dict(st: models.ExamState) -> dict:
         "ended_at":   str(st.ended_at) if st.ended_at else None,
         "started_by": st.started_by,
         "problem_id": st.problem_id,
+        "class_id":   st.class_id,
     }
+
+
+def _owned_class_id(db: Session, teacher, class_id: int) -> int:
+    """Validate class_id belongs to this teacher (or caller is admin); raise otherwise."""
+    c = db.query(models.Classroom).filter(models.Classroom.id == class_id).first()
+    if not c:
+        raise HTTPException(status_code=404, detail="Class not found")
+    if teacher.role != "admin" and c.teacher_id != teacher.student_id:
+        raise HTTPException(status_code=403, detail="This is not your class")
+    return c.id
 
 
 def _current_problem(db: Session) -> Optional[models.Problem]:
@@ -277,6 +290,58 @@ def teacher_labels(
     } for r in rows]
 
 
+RETRAIN_THRESHOLD = 10
+
+
+@router.post("/teacher/feedback")
+def submit_ai_feedback(
+    data: schemas.TeacherAIFeedbackRequest,
+    db: Session = Depends(get_db),
+    teacher = Depends(auth.get_teacher_user),
+):
+    """Quick "Agree/Disagree with AI" button on the side panel (teacher.html).
+    Logs the correction for later model retraining — separate from the
+    Human/AI/Unsure label form, which is the teacher's own independent
+    judgement rather than a reaction to the AI's specific prediction."""
+    _require_visible(db, teacher, data.student_id)
+
+    session = db.query(models.StudentSession).filter(
+        models.StudentSession.id == data.session_id,
+        models.StudentSession.student_id == data.student_id,
+    ).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found for this student")
+
+    correction_label = data.ai_prediction if data.agreed else (
+        "Human" if data.ai_prediction == "AI" else "AI"
+    )
+
+    db.add(models.CorrectionMemory(
+        session_id=data.session_id,
+        student_id=data.student_id,
+        teacher_id=teacher.student_id,
+        agreed=data.agreed,
+        original_pred=data.ai_prediction,
+        corrected_label=correction_label,
+        corrected_by=teacher.student_id,
+    ))
+    db.commit()
+
+    total = db.query(models.CorrectionMemory).count()
+    if total >= RETRAIN_THRESHOLD and total - 1 < RETRAIN_THRESHOLD:
+        # Log once, right as the count crosses the threshold (not on every
+        # call afterwards). Actual retrain hook to be added later.
+        logger.warning("RETRAIN TRIGGER: %d corrections reached", RETRAIN_THRESHOLD)
+
+    return {
+        "message":          "Feedback recorded",
+        "success":          True,
+        "agreed":           data.agreed,
+        "ai_prediction":    data.ai_prediction,
+        "correction_label": correction_label,
+    }
+
+
 # ── dashboard page ─────────────────────────────────────────────
 TEMPLATE = Path(__file__).resolve().parent.parent / "templates" / "teacher.html"
 
@@ -358,24 +423,29 @@ def create_problem(
 
 @router.post("/teacher/exam/start")
 def exam_start(
+    class_id: Optional[int] = Body(default=None, embed=True),
     db: Session = Depends(get_db),
     teacher = Depends(auth.get_teacher_user),
 ):
     st = _exam_state(db)
     if st.is_active:
         raise HTTPException(status_code=400, detail="Exam is already active")
+    if class_id is not None:
+        class_id = _owned_class_id(db, teacher, class_id)
     problem = _current_problem(db)
     st.is_active  = True
     st.started_at = datetime.utcnow()
     st.ended_at   = None
     st.started_by = teacher.student_id
     st.problem_id = problem.id if problem else None
+    st.class_id   = class_id
     db.commit()
     return {"message": "Exam started", "success": True, "exam": _exam_dict(st)}
 
 
 @router.post("/teacher/exam/end")
 def exam_end(
+    class_id: Optional[int] = Body(default=None, embed=True),  # accepted for API symmetry; not required
     db: Session = Depends(get_db),
     teacher = Depends(auth.get_teacher_user),
 ):
