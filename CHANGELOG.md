@@ -7,3 +7,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ## [Unreleased]
 
 - Initial release
+
+## [1.0.3]
+
+- Fix: same-file paste now scores +2 instead of +15 (external paste unchanged)
+- Fix: screen_freeze_events is now a running counter, not a derived value

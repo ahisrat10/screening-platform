@@ -2,7 +2,7 @@
     "name": "code-monitor",
     "displayName": "Code Monitor",
     "description": "Automated Technical Screening Platform — Student Monitor",
-    "version": "1.0.2",
+    "version": "1.0.3",
     "publisher": "screening-platform",
     "engines": {
         "vscode": "^1.85.0"

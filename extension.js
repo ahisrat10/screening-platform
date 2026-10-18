@@ -79,6 +79,7 @@ let codeJumpCount         = 0;
 let deletionEvents        = [];                 // Feature: Code Deletion Pattern
 let undoCount             = 0;                  // Feature: Undo/Redo Frequency
 let redoCount             = 0;
+let screenFreezeCount     = 0;                  // Feature: Screen Freeze Detection (running count)
 let copyFromSameFileCount = 0;                  // Feature: Copy From Same File
 let renameEventCount      = 0;                  // Feature: Variable Rename Detection
 let skillJumpEvents       = [];                 // Feature: Sudden Skill Jump
@@ -403,20 +404,35 @@ function activate(context) {
                     timestamp: new Date().toISOString(),
                 });
 
-                addSuspiciousScore(15, 'Paste detected');
-
                 // ── Copy From Same File ─────────────────────────
-                // If the pasted text already appears elsewhere in the
-                // current document, it was likely copied internally
-                // rather than pulled from an external source.
+                // Reconstruct the document text as it was BEFORE this paste
+                // was applied, then check whether the exact pasted text
+                // already existed there. Only exact for a single contiguous
+                // edit (the normal paste case); for the rare multi-part
+                // paste VS Code sometimes splits into several contentChanges,
+                // fall back to the post-edit document (a block pasted from
+                // elsewhere in THIS file still duplicates text outside the
+                // newly inserted range either way).
                 const fullText = event.document.getText();
-                const occurrences = pastePreview.trim().length > 5
-                    ? countOccurrences(fullText, pastePreview.trim())
-                    : 0;
-                const isCopyFromSameFile = occurrences > 1;
+                let preEditText = fullText;
+                if (event.contentChanges.length === 1) {
+                    const change = event.contentChanges[0];
+                    preEditText = fullText.slice(0, change.rangeOffset)
+                        + fullText.slice(change.rangeOffset + change.text.length);
+                }
+                const pastedText = pastePreview.trim();
+                const isCopyFromSameFile = pastedText.length > 5 && preEditText.includes(pastedText);
                 if (isCopyFromSameFile) {
                     copyFromSameFileCount++;
                 }
+
+                // Same-file paste (refactor/move within this document) is
+                // far less suspicious than pasting content that didn't
+                // already exist here (e.g. from a browser or another app).
+                addSuspiciousScore(
+                    isCopyFromSameFile ? 2 : 15,
+                    isCopyFromSameFile ? 'Same-file paste detected' : 'Paste detected'
+                );
 
                 sendToServer('/student/event', {
                     student_id: studentId,
@@ -705,6 +721,7 @@ function resetBehavioralState() {
     deletionEvents          = [];
     undoCount               = 0;
     redoCount               = 0;
+    screenFreezeCount       = 0;
     copyFromSameFileCount   = 0;
     renameEventCount        = 0;
     skillJumpEvents         = [];
@@ -1057,6 +1074,7 @@ function checkScreenFreeze() {
 
     const silentMs = Date.now() - lastActivityAt;
     if (silentMs >= CONFIG.FREEZE_THRESHOLD_MS) {
+        screenFreezeCount++;
         sendToServer('/student/event', {
             student_id: studentId,
             event_type: 'SCREEN_FREEZE_DETECTED',
@@ -1126,8 +1144,7 @@ function collectBehavioralSignals() {
         keys_per_minute_series:     kpmSamples.slice(-20),
         typing_pause_count:         pauseEvents.length,
         typing_pause_avg_ms:        Math.round(avgPause),
-        screen_freeze_events:       lastActivityAt !== null
-            ? Math.max(0, Math.floor((Date.now() - lastActivityAt) / CONFIG.FREEZE_THRESHOLD_MS)) : 0,
+        screen_freeze_events:       screenFreezeCount,
         sudden_code_jump_count:     codeJumpCount,
         code_deletion_events:       deletionEvents.length,
         code_deletion_chars_total:  deletionEvents.reduce((s, d) => s + d.chars, 0),
