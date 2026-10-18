@@ -960,17 +960,6 @@ function computeCodeFingerprint(code) {
     return lastCodeFingerprint;
 }
 
-function countOccurrences(haystack, needle) {
-    if (!needle) return 0;
-    let count = 0;
-    let pos   = 0;
-    while ((pos = haystack.indexOf(needle, pos)) !== -1) {
-        count++;
-        pos += needle.length;
-    }
-    return count;
-}
-
 // ══════════════════════════════════════════════════════════════
 // LAB STATUS / EXAM MODE — follows the teacher's "Start Lab" / "End Lab"
 // ══════════════════════════════════════════════════════════════
