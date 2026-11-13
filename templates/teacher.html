@@ -41,6 +41,10 @@
         <p id="teacher_name" class="text-white text-sm font-medium"></p>
         <p class="text-gray-500 text-xs">Teacher</p>
       </div>
+      <button onclick="openSimilarityReport()"
+        class="bg-purple-700 hover:bg-purple-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition">
+        🧬 Similarity Report
+      </button>
       <button onclick="logout()"
         class="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition">
         Logout
@@ -278,6 +282,20 @@
       <button onclick="closeReport()" class="text-gray-500 hover:text-white text-3xl leading-none">&times;</button>
     </div>
     <div id="rp_body" class="p-5 overflow-y-auto scrollbar-thin space-y-6 text-sm"></div>
+  </div>
+</div>
+
+<!-- Similarity Report modal -->
+<div id="similarity_modal" class="hidden fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center z-[60] p-4">
+  <div class="bg-gray-900 rounded-2xl border border-gray-700 w-full max-w-5xl max-h-[90vh] flex flex-col">
+    <div class="p-5 border-b border-gray-700 flex justify-between items-start">
+      <div>
+        <h2 class="text-xl font-bold text-white">🧬 Similarity Report</h2>
+        <p id="sim_meta" class="text-gray-400 text-sm mt-1"></p>
+      </div>
+      <button onclick="closeSimilarityReport()" class="text-gray-500 hover:text-white text-3xl leading-none">&times;</button>
+    </div>
+    <div id="sim_body" class="p-5 overflow-y-auto scrollbar-thin text-sm"></div>
   </div>
 </div>
 
@@ -995,6 +1013,44 @@ async function openReport(id) {
 }
 function closeReport() { document.getElementById('report_modal').classList.add('hidden'); }
 
+// ── Similarity Report ───────────────────────────────────────────
+async function openSimilarityReport() {
+  const modal = document.getElementById('similarity_modal'), body = document.getElementById('sim_body');
+  document.getElementById('sim_meta').textContent = 'Loading…';
+  body.innerHTML = '<p class="text-gray-500">Loading…</p>';
+  modal.classList.remove('hidden');
+  try {
+    const r = await api('/admin/similarity-report');
+    document.getElementById('sim_meta').textContent =
+      `${r.students_checked} students checked · ${r.pairs_flagged} pair(s) above ${(r.threshold * 100).toFixed(0)}% similarity`;
+    if (!r.pairs.length) {
+      body.innerHTML = '<p class="text-gray-500">No suspiciously similar submissions found.</p>';
+      return;
+    }
+    body.innerHTML = `<div class="overflow-x-auto scrollbar-thin"><table class="w-full text-xs">
+      <thead><tr class="text-gray-500 text-left border-b border-gray-800">
+        <th class="py-2 pr-4 font-medium">Student 1</th>
+        <th class="py-2 pr-4 font-medium">Student 2</th>
+        <th class="py-2 pr-4 font-medium">Similarity</th>
+        <th class="py-2 pr-4 font-medium">Snippet 1</th>
+        <th class="py-2 pr-4 font-medium">Snippet 2</th>
+      </tr></thead>
+      <tbody class="divide-y divide-gray-800">
+        ${r.pairs.map(p => `<tr class="align-top">
+          <td class="py-2 pr-4 text-white whitespace-nowrap">${esc(p.student_id_1)}</td>
+          <td class="py-2 pr-4 text-white whitespace-nowrap">${esc(p.student_id_2)}</td>
+          <td class="py-2 pr-4"><span class="px-2 py-0.5 rounded-full text-xs font-semibold bg-red-900 text-red-300">${(p.similarity_score * 100).toFixed(1)}%</span></td>
+          <td class="py-2 pr-4"><pre class="code-view text-gray-300 bg-gray-950 border border-gray-800 rounded p-2 max-w-xs max-h-40 overflow-auto whitespace-pre-wrap">${esc(p.code_snippet_1)}</pre></td>
+          <td class="py-2 pr-4"><pre class="code-view text-gray-300 bg-gray-950 border border-gray-800 rounded p-2 max-w-xs max-h-40 overflow-auto whitespace-pre-wrap">${esc(p.code_snippet_2)}</pre></td>
+        </tr>`).join('')}
+      </tbody>
+    </table></div>`;
+  } catch (e) {
+    body.innerHTML = `<p class="text-red-400">${esc(e.message)}</p>`;
+  }
+}
+function closeSimilarityReport() { document.getElementById('similarity_modal').classList.add('hidden'); }
+
 // ── polling (10s) ──────────────────────────────────────────────
 let refreshing = false;
 async function refreshAll() {
@@ -1014,7 +1070,7 @@ async function refreshAll() {
 
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') {
-    closeReport(); closeCreateClass(); closeInvite();
+    closeReport(); closeCreateClass(); closeInvite(); closeSimilarityReport();
     if (document.getElementById('dlg').classList.contains('hidden')) closePanel();
   }
 });
