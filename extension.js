@@ -9,7 +9,7 @@ const CONFIG = {
     SERVER_HOST:               'screening-platform-production.up.railway.app',
     SERVER_PORT:               443,
     SNAPSHOT_INTERVAL_MS:      60000,   // Send code every 60 seconds
-    HEARTBEAT_INTERVAL_MS:     30000,   // Heartbeat every 30 seconds
+    HEARTBEAT_INTERVAL_MS:     60000,   // Heartbeat every 60 seconds
     LAB_STATUS_INTERVAL_MS:    30000,   // Ask the server if a lab is running
     IDLE_TIMEOUT_MS:           60000,   // 60 seconds no typing = idle
     PASTE_CHAR_THRESHOLD:      10,      // 10+ chars at once = paste
@@ -21,7 +21,7 @@ const CONFIG = {
 
     // ── New feature thresholds ──────────────────────────────────
     PAUSE_THRESHOLD_MS:        3000,    // gap between keystrokes = a "pause"
-    FREEZE_CHECK_INTERVAL_MS:  5000,    // how often to check for screen freeze
+    FREEZE_CHECK_INTERVAL_MS:  10000,   // how often to check for screen freeze
     FREEZE_THRESHOLD_MS:       20000,   // focused + silent this long = freeze
     CODE_JUMP_LINE_THRESHOLD:  50,      // cursor moving >50 lines instantly
     LARGE_DELETION_THRESHOLD:  30,      // chars removed at once
@@ -92,6 +92,17 @@ let lastVisibleRangeLine  = null;
 let speedComplexitySamples = [];                // Feature: Typing Speed vs Complexity
 let lastCodeFingerprint   = null;               // Feature: Same Code As Classmate
 let lastAIDetectionResult = null;
+let lastCodeTokensHash    = null;               // Feature: Token-set hash for similarity report
+
+// ══════════════════════════════════════════════════════════════
+// GLOBAL STATE — debounce timers / batching (perf fixes)
+// ══════════════════════════════════════════════════════════════
+let keystrokeDebounceTimer  = null;
+let selectionDebounceTimer  = null;
+let scrollDebounceTimer     = null;
+let pendingTextChangeEvents = [];               // buffered events awaiting the 500ms batch flush
+let lastEnterTime           = 0;                // Enter-key batching (collapse rapid duplicate Enters)
+let lastSnapshotCode        = '';               // skip sending a snapshot identical to the last one
 
 // ══════════════════════════════════════════════════════════════
 // ACTIVATE
@@ -288,8 +299,38 @@ function activate(context) {
             const scheme = event.document.uri.scheme;
             if (scheme !== 'file' && scheme !== 'untitled') return;
 
+            // ── Debounce / batch: buffer events, flush at most once per
+            // 500ms so a fast typist doesn't run the full handler on every
+            // single keystroke. Every event is kept (pushed to the buffer)
+            // so no data is lost — they're just processed together.
+            pendingTextChangeEvents.push(event);
+            if (keystrokeDebounceTimer) clearTimeout(keystrokeDebounceTimer);
+            keystrokeDebounceTimer = setTimeout(() => {
+                const events = pendingTextChangeEvents;
+                pendingTextChangeEvents = [];
+                keystrokeDebounceTimer = null;
+                events.forEach(processTextChangeEvent);
+            }, 500);
+        }
+    );
+
+    function processTextChangeEvent(event) {
             const now = Date.now();
             lastActivityAt = now;
+
+            // ── Enter key batching ──────────────────────────────
+            // Auto-indent / multi-cursor Enter can fire several rapid
+            // near-duplicate newline-only events; collapse any that arrive
+            // within 200ms of the previous one.
+            if (event.contentChanges.length === 1) {
+                const soleText = event.contentChanges[0].text;
+                if (soleText === '\n' || soleText === '\r\n') {
+                    if (now - lastEnterTime < 200) {
+                        return;
+                    }
+                    lastEnterTime = now;
+                }
+            }
 
             // ── Aggregate ALL changes in this event ────────────
             // VS Code sometimes splits a paste into multiple small
@@ -488,16 +529,26 @@ function activate(context) {
             }
 
             resetIdleTimer();
-        }
-    );
+    }
 
     // ══════════════════════════════════════════════════════════
     // LISTENER: Cursor / Selection changes
     // Detects: Sudden Code Jump
+    // Debounced 300ms — selection events can fire very rapidly during
+    // drag-selection / multi-cursor operations.
     // ══════════════════════════════════════════════════════════
     let selectionChangeListener = vscode.window.onDidChangeTextEditorSelection(
         (event) => {
             if (!isConnected) return;
+            if (selectionDebounceTimer) clearTimeout(selectionDebounceTimer);
+            selectionDebounceTimer = setTimeout(() => {
+                selectionDebounceTimer = null;
+                processSelectionChange(event);
+            }, 300);
+        }
+    );
+
+    function processSelectionChange(event) {
             const now = Date.now();
             lastActivityAt = now;
 
@@ -522,15 +573,24 @@ function activate(context) {
                 }
             }
             lastCursorLine = line;
-        }
-    );
+    }
 
     // ══════════════════════════════════════════════════════════
     // LISTENER: Scroll Behavior
+    // Debounced 1000ms — scrolling fires very frequently.
     // ══════════════════════════════════════════════════════════
     let scrollListener = vscode.window.onDidChangeTextEditorVisibleRanges(
         (event) => {
             if (!isConnected) return;
+            if (scrollDebounceTimer) clearTimeout(scrollDebounceTimer);
+            scrollDebounceTimer = setTimeout(() => {
+                scrollDebounceTimer = null;
+                processScrollChange(event);
+            }, 1000);
+        }
+    );
+
+    function processScrollChange(event) {
             const now = Date.now();
             const topLine = event.visibleRanges[0]?.start.line;
             if (topLine === undefined) return;
@@ -543,8 +603,7 @@ function activate(context) {
                 if (scrollEvents.length > 200) scrollEvents.shift();
             }
             lastVisibleRangeLine = topLine;
-        }
-    );
+    }
 
     // ══════════════════════════════════════════════════════════
     // LISTENER: Window Focus
@@ -734,6 +793,8 @@ function resetBehavioralState() {
     speedComplexitySamples  = [];
     lastCodeFingerprint     = null;
     lastAIDetectionResult   = null;
+    lastCodeTokensHash      = null;
+    lastSnapshotCode        = '';
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -818,6 +879,10 @@ function sendCodeSnapshot() {
     const code = editor.document.getText();
     if (!code || code.trim().length === 0) return;
 
+    // Skip sending a snapshot that is identical to the last one.
+    if (code.trim() === lastSnapshotCode.trim()) return;
+    lastSnapshotCode = code;
+
     const analysis = analyzeCodeForAIPatterns(code);
     sessionStats.codeSnapshots++;
 
@@ -852,6 +917,7 @@ function sendCodeSnapshot() {
         line_count:      code.split('\n').length,
         analysis:        analysis,
         code_fingerprint: computeCodeFingerprint(code), // Same Code As Classmate (server-side match)
+        code_tokens_hash: computeCodeTokensHash(code),  // Similarity Report (token-set hash)
         snapshot_number: sessionStats.codeSnapshots,
         timestamp:       new Date().toISOString(),
     });
@@ -958,6 +1024,29 @@ function computeCodeFingerprint(code) {
     }
     lastCodeFingerprint = hash.toString(16);
     return lastCodeFingerprint;
+}
+
+// ══════════════════════════════════════════════════════════════
+// CODE TOKENS HASH — order-independent token-set hash used by the
+// backend's "Similarity Report" (catches renamed/reordered copies that
+// computeCodeFingerprint's literal-text hash would miss).
+// ══════════════════════════════════════════════════════════════
+function computeCodeTokensHash(code) {
+    const normalized = code
+        .toLowerCase()
+        .replace(/\/\/.*$/gm, '')
+        .replace(/#.*$/gm, '')
+        .replace(/[^\w\s]/g, ' ');
+
+    const tokens = normalized.split(/\s+/).filter(t => t.length > 0).sort();
+    const joined = tokens.join('');
+
+    let hash = 5381;
+    for (let i = 0; i < joined.length; i++) {
+        hash = ((hash << 5) + hash + joined.charCodeAt(i)) >>> 0;
+    }
+    lastCodeTokensHash = hash.toString(16);
+    return lastCodeTokensHash;
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -1118,10 +1207,7 @@ function collectBehavioralSignals() {
         total_pastes:            sessionStats.totalPastes,
         total_tab_switches:      sessionStats.totalTabSwitches,
         total_idle_events:       sessionStats.totalIdleEvents,
-        code_snapshots:          sessionStats.codeSnapshots,
         suspicious_score:        suspiciousScore,
-        is_window_focused:       isWindowFocused,
-        is_idle:                 isIdle,
         session_duration_ms:     sessionStats.sessionStart
             ? Date.now() - new Date(sessionStats.sessionStart).getTime() : 0,
 
@@ -1149,6 +1235,7 @@ function collectBehavioralSignals() {
         typing_speed_avg_cps:       Number(avgSpeed.toFixed(2)),
         code_complexity_avg:        Number(avgComplexity.toFixed(2)),
         code_fingerprint:           lastCodeFingerprint,
+        code_tokens_hash:           lastCodeTokensHash,
     };
 }
 
