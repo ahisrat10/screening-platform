@@ -1343,7 +1343,6 @@ from fastapi.responses import HTMLResponse
 TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
 
 PAGES = {
-    "/":               "login.html",
     "/login":          "login.html",
     "/register":       "register.html",
     "/student-dashboard": "student_dashboard.html",
@@ -1375,8 +1374,12 @@ for _route, _file in PAGES.items():
     app.add_api_route(_route, _make_page(_file), methods=["GET"],
                       response_class=HTMLResponse, include_in_schema=False)
 
+# GET + HEAD (health checks / uptime pingers from Render etc. use HEAD)
+app.add_api_route("/", _make_page("login.html"), methods=["GET", "HEAD"],
+                  response_class=HTMLResponse, include_in_schema=False)
 
-@app.get("/health")
+
+@app.api_route("/health", methods=["GET", "HEAD"])
 def home():
     return {
         "message": "Automated Technical Screening Platform API v3.1",
