@@ -30,6 +30,7 @@ const CONFIG = {
     SESSION_BREAK_THRESHOLD_MS: 120000, // 2 min silent = a "session break"
     SKILL_JUMP_SCORE_DELTA:    30,      // ai_score jump between snapshots
     RENAME_MIN_EDITS:          2,       // simultaneous edits = rename op
+    EVENT_BATCH_INTERVAL_MS:   120000,  // low-priority behavioral events: flush queue every 2 min
 };
 
 // ══════════════════════════════════════════════════════════════
@@ -104,6 +105,8 @@ let lastEnterTime           = 0;                // Enter-key batching (collapse 
 let lastSnapshotCode        = '';               // skip sending a snapshot identical to the last one
 let lastSnapshotLines       = null;             // array of lines from the last snapshot sent (for delta encoding)
 let linesChangedSinceSnapshot = 0;              // smart trigger: added+removed lines since the last snapshot
+let eventQueue              = [];               // low-priority behavioral events awaiting the 2-min batch flush
+let batchTimer              = null;
 
 // ══════════════════════════════════════════════════════════════
 // ACTIVATE
@@ -238,6 +241,8 @@ function activate(context) {
                 'Yes, Logout', 'Cancel'
             );
             if (confirm !== 'Yes, Logout') return;
+
+            flushEventQueue();
 
             sendToServer('/student/disconnect', {
                 student_id: studentId,
@@ -444,15 +449,9 @@ function activate(context) {
                 if (texts.length >= CONFIG.RENAME_MIN_EDITS &&
                     texts.every(t => t === texts[0])) {
                     renameEventCount++;
-                    sendToServer('/student/event', {
-                        student_id: studentId,
-                        event_type: 'VARIABLE_RENAME_DETECTED',
-                        severity:   'INFO',
-                        details: {
-                            new_name:    texts[0],
-                            occurrences: texts.length,
-                        },
-                        timestamp: new Date().toISOString(),
+                    queueBehavioralEvent('VARIABLE_RENAME_DETECTED', 'INFO', {
+                        new_name:    texts[0],
+                        occurrences: texts.length,
                     });
                 }
             }
@@ -590,16 +589,10 @@ function activate(context) {
                 const jump = Math.abs(line - lastCursorLine);
                 if (jump >= CONFIG.CODE_JUMP_LINE_THRESHOLD) {
                     codeJumpCount++;
-                    sendToServer('/student/event', {
-                        student_id: studentId,
-                        event_type: 'SUDDEN_CODE_JUMP',
-                        severity:   'LOW',
-                        details: {
-                            from_line: lastCursorLine,
-                            to_line:   line,
-                            lines_jumped: jump,
-                        },
-                        timestamp: new Date().toISOString(),
+                    queueBehavioralEvent('SUDDEN_CODE_JUMP', 'LOW', {
+                        from_line: lastCursorLine,
+                        to_line:   line,
+                        lines_jumped: jump,
                     });
                 }
             }
@@ -677,15 +670,9 @@ function activate(context) {
                     );
                 } else {
                     // Single tab switch
-                    sendToServer('/student/event', {
-                        student_id: studentId,
-                        event_type: 'WINDOW_UNFOCUSED',
-                        severity:   'LOW',
-                        details: {
-                            total_switches: sessionStats.totalTabSwitches,
-                            message:        'Student left VS Code window',
-                        },
-                        timestamp: new Date().toISOString(),
+                    queueBehavioralEvent('WINDOW_UNFOCUSED', 'LOW', {
+                        total_switches: sessionStats.totalTabSwitches,
+                        message:        'Student left VS Code window',
                     });
                 }
 
@@ -697,15 +684,9 @@ function activate(context) {
                 const awayMs      = windowBlurTime ? now - windowBlurTime : 0;
                 const awaySecs    = (awayMs / 1000).toFixed(1);
 
-                sendToServer('/student/event', {
-                    student_id: studentId,
-                    event_type: 'WINDOW_REFOCUSED',
-                    severity:   'INFO',
-                    details: {
-                        away_duration_seconds: awaySecs,
-                        message:               `Student returned after ${awaySecs}s`,
-                    },
-                    timestamp: new Date().toISOString(),
+                queueBehavioralEvent('WINDOW_REFOCUSED', 'INFO', {
+                    away_duration_seconds: awaySecs,
+                    message:               `Student returned after ${awaySecs}s`,
                 });
 
                 // DETECT: Long Absence
@@ -747,15 +728,9 @@ function activate(context) {
             lastVisibleRangeLine = null;
             lastLineCount        = editor.document.lineCount;
 
-            sendToServer('/student/event', {
-                student_id: studentId,
-                event_type: 'FILE_SWITCHED',
-                severity:   'INFO',
-                details: {
-                    new_file: editor.document.fileName,
-                    language: editor.document.languageId,
-                },
-                timestamp: new Date().toISOString(),
+            queueBehavioralEvent('FILE_SWITCHED', 'INFO', {
+                new_file: editor.document.fileName,
+                language: editor.document.languageId,
             });
         }
     );
@@ -782,6 +757,7 @@ function startMonitoring() {
     kpmTimer       = setInterval(sampleKeysPerMinute, CONFIG.KPM_SAMPLE_INTERVAL_MS);
     freezeTimer    = setInterval(checkScreenFreeze, CONFIG.FREEZE_CHECK_INTERVAL_MS);
     labTimer       = setInterval(pollLabStatus, CONFIG.LAB_STATUS_INTERVAL_MS);
+    batchTimer     = setInterval(flushEventQueue, CONFIG.EVENT_BATCH_INTERVAL_MS);
     pollLabStatus();   // don't wait 30s to learn a lab is already running
     resetIdleTimer();
 }
@@ -791,8 +767,9 @@ function stopMonitoring() {
     clearInterval(kpmTimer);
     clearInterval(freezeTimer);
     clearInterval(labTimer);
+    clearInterval(batchTimer);
     clearTimeout(idleTimer);
-    heartbeatTimer = kpmTimer = freezeTimer = idleTimer = labTimer = null;
+    heartbeatTimer = kpmTimer = freezeTimer = idleTimer = labTimer = batchTimer = null;
     examMode  = false;
     activeLab = null;
 }
@@ -826,6 +803,7 @@ function resetBehavioralState() {
     lastSnapshotCode        = '';
     lastSnapshotLines       = null;
     linesChangedSinceSnapshot = 0;
+    eventQueue              = [];
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -1517,6 +1495,7 @@ function sendHeartbeat() {
 function handleHeartbeatResponse(reply) {
     if (!reply || reply.force_disconnect !== true || !isConnected) return;
 
+    flushEventQueue();
     stopMonitoring();
     isConnected = false;
     studentId   = null;
@@ -1621,6 +1600,33 @@ function updateStatusBar(status) {
             statusBarItem.command = 'code-monitor.status';
             break;
     }
+}
+
+// ══════════════════════════════════════════════════════════════
+// BATCHED BEHAVIORAL EVENTS — low-priority signals (file switches,
+// cursor jumps, rename detection, brief window blur/refocus) don't
+// need to reach the teacher's live dashboard instantly, so they're
+// queued and flushed together every 2 minutes instead of one POST
+// per event. HIGH/MEDIUM-severity proctoring alerts (paste, rapid
+// tab switching, skill jumps, screen freeze, long absence, idle,
+// exam mode changes, AI detection) still send immediately via
+// sendToServer('/student/event', ...) so live monitoring during an
+// exam isn't delayed.
+// ══════════════════════════════════════════════════════════════
+function queueBehavioralEvent(eventType, severity, details) {
+    eventQueue.push({
+        event_type: eventType,
+        severity:   severity,
+        details:    details,
+        timestamp:  new Date().toISOString(),
+    });
+}
+
+function flushEventQueue() {
+    if (!isConnected || eventQueue.length === 0) return;
+    const events = eventQueue;
+    eventQueue = [];
+    sendToServer('/student/batch-events', { events });
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -1735,15 +1741,20 @@ function deactivate() {
         ? { student_id: studentId, timestamp: new Date().toISOString() }
         : null;
 
+    const pendingEvents = (wasConnected && eventQueue.length > 0)
+        ? postAndWait('/student/batch-events', { events: eventQueue }, 3000)
+        : null;
+    eventQueue = [];
+
     // Stop heartbeats first: a late heartbeat would mark the student connected again.
     stopMonitoring();
     if (statusBarItem) statusBarItem.dispose();
 
-    if (!payload) return undefined;
+    if (!payload) return pendingEvents || undefined;
 
-    const pending = postAndWait('/student/disconnect', payload, 3000);
+    const pendingDisconnect = postAndWait('/student/disconnect', payload, 3000);
     isConnected = false;
-    return pending;
+    return pendingEvents ? Promise.all([pendingEvents, pendingDisconnect]) : pendingDisconnect;
 }
 
 module.exports = { activate, deactivate };
