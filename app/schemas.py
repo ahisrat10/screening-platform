@@ -82,6 +82,9 @@ class LoginRequest(BaseModel):
     password:   str
     role:       Optional[str] = None   # UI toggle; checked after the password
 
+class GuestLoginRequest(BaseModel):
+    student_id: str
+
 class ForgotPasswordRequest(BaseModel):
     # Email is enough; student_id is still accepted (older clients send both).
     email:      EmailStr

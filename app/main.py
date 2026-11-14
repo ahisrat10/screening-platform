@@ -313,6 +313,38 @@ def login(data: schemas.LoginRequest, db: Session = Depends(get_db)):
     }
 
 
+
+
+@app.post("/auth/guest-login", response_model=schemas.TokenResponse)
+def guest_login(data: schemas.GuestLoginRequest, db: Session = Depends(get_db)):
+    """
+    Guest / passwordless login for lab sessions.
+    Accepts student_id only — no password check.
+    Only allowed for student-role accounts (not admin/teacher).
+    Intended for supervised lab exams where the teacher distributes IDs.
+    """
+    user = db.query(models.User).filter(
+        models.User.student_id == data.student_id
+    ).first()
+
+    if not user:
+        raise HTTPException(status_code=401, detail="Student ID not found")
+
+    if user.role not in ("student",):
+        raise HTTPException(status_code=403, detail="Guest login is only available for students")
+
+    if not user.is_active:
+        raise HTTPException(status_code=403, detail="This account has been deactivated.")
+
+    token = auth.create_token({"sub": user.student_id, "role": user.role})
+    return {
+        "access_token": token,
+        "token_type":   "bearer",
+        "student_id":   user.student_id,
+        "full_name":    user.full_name,
+        "role":         user.role,
+    }
+
 # In-process limiter so a 6-digit OTP can't be brute-forced.
 # LIMITATION: state lives in this process's memory, so it resets on restart and
 # is not shared between workers. That is fine while we run a single Railway
