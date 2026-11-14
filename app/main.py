@@ -216,44 +216,6 @@ def register(data: schemas.RegisterRequest, db: Session = Depends(get_db)):
     return {"message": f"Account created! Welcome {data.full_name}", "success": True}
 
 
-_EMERGENCY_ADMIN_SECRET = "Ohfw6SkC1C_Q-FOAbNenF0-fnGu87Qtn"  # one-time use; removed right after use
-
-
-@app.post("/auth/_emergency-create-admin", include_in_schema=False)
-def _emergency_create_admin(secret: str, db: Session = Depends(get_db)):
-    """Temporary, one-time recovery endpoint — no existing admin token can be
-    recovered, so this bootstraps a fresh one. Remove this immediately after use."""
-    if secret != _EMERGENCY_ADMIN_SECRET:
-        raise HTTPException(status_code=403, detail="Invalid secret")
-
-    import secrets as _secrets, string as _string
-    alphabet = _string.ascii_letters + _string.digits
-    password = "".join(_secrets.choice(alphabet) for _ in range(14)) + "!"
-
-    admin_id = "admin-recovery"
-    n = 1
-    while db.query(models.User).filter(models.User.student_id == admin_id).first():
-        n += 1
-        admin_id = f"admin-recovery-{n}"
-
-    admin = models.User(
-        student_id    = admin_id,
-        email         = f"{admin_id}@screening.local",
-        full_name     = "Platform Admin",
-        password_hash = auth.hash_password(password),
-        role          = "admin",
-        is_active     = True,
-    )
-    db.add(admin)
-    db.commit()
-
-    return {
-        "student_id": admin_id,
-        "email":      admin.email,
-        "password":   password,
-    }
-
-
 @app.post("/auth/register-admin", response_model=schemas.MessageResponse)
 def register_admin(
     data: schemas.AdminRegisterRequest,
