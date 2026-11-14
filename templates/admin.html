@@ -211,7 +211,7 @@
 </div>
 
 <script>
-const API       = 'https://screening-platform-production.up.railway.app';
+const API       = 'https://screening-platform-tpku.onrender.com';
 const token     = localStorage.getItem('token');
 const adminName = localStorage.getItem('full_name');
 const role      = localStorage.getItem('role');
@@ -230,7 +230,7 @@ let selectedId   = null;
 // ── WEBSOCKET ──────────────────────────────────────────────────
 function connectWS() {
   try {
-    ws = new WebSocket('wss://screening-platform-production.up.railway.app/ws/admin?token=' + encodeURIComponent(token));
+    ws = new WebSocket('wss://screening-platform-tpku.onrender.com/ws/admin?token=' + encodeURIComponent(token));
 
     ws.onopen = () => {
       const badge = document.getElementById('ws_badge');
