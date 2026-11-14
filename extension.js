@@ -6,7 +6,7 @@ const https  = require('https');
 // ══════════════════════════════════════════════════════════════
 
 const CONFIG = {
-    SERVER_HOST:               'screening-platform-production.up.railway.app',
+    SERVER_HOST:               'screening-platform-tpku.onrender.com',
     SERVER_PORT:               443,
     SNAPSHOT_INTERVAL_MS:      60000,   // Send code every 60 seconds
     HEARTBEAT_INTERVAL_MS:     60000,   // Heartbeat every 60 seconds
