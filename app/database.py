@@ -13,9 +13,9 @@ if DATABASE_URL and DATABASE_URL.startswith("postgres://"):
 
 engine = create_engine(
     DATABASE_URL,
-    pool_size=40,
-    max_overflow=20,      # absolute max connections = 60, safely under Railway's 100 limit
-    pool_pre_ping=True,   # drop dead connections (e.g. after a Railway DB restart)
+    pool_size=5,
+    max_overflow=10,      # absolute max connections = 15, safely under Render free tier's ~25 connection limit
+    pool_pre_ping=True,   # drop dead connections (e.g. after a DB restart)
 )
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
