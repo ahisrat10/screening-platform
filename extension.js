@@ -143,25 +143,40 @@ function activate(context) {
             });
             if (!id) return;
 
-            // Ask Password
-            const password = await vscode.window.showInputBox({
-                prompt:      '🔒 Enter your Exam Password',
-                placeHolder: 'Enter your password',
-                password:    true,
-                validateInput: (val) => {
-                    if (!val || val.trim().length < 3)
-                        return 'Password is too short!';
-                    return null;
-                }
-            });
-            if (!password) return;
+            // Ask login mode: normal or guest
+            const loginMode = await vscode.window.showQuickPick(
+                [
+                    { label: '🔒 Normal Login', description: 'Student ID + Password', value: 'normal' },
+                    { label: '🎓 Guest Login',  description: 'Student ID only (lab mode)', value: 'guest' },
+                ],
+                { placeHolder: 'Select login method', canPickMany: false }
+            );
+            if (!loginMode) return;
 
-            // Show loading
-            updateStatusBar('loading');
-            vscode.window.showInformationMessage('🔄 Verifying credentials...');
+            let loginResult;
+            if (loginMode.value === 'guest') {
+                // Guest login — ID only
+                updateStatusBar('loading');
+                vscode.window.showInformationMessage('🔄 Connecting as guest...');
+                loginResult = await callGuestLoginAPI(id.trim());
+            } else {
+                // Normal login — ask password
+                const password = await vscode.window.showInputBox({
+                    prompt:      '🔒 Enter your Exam Password',
+                    placeHolder: 'Enter your password',
+                    password:    true,
+                    validateInput: (val) => {
+                        if (!val || val.trim().length < 3)
+                            return 'Password is too short!';
+                        return null;
+                    }
+                });
+                if (!password) return;
 
-            // Call backend to verify
-            const loginResult = await callLoginAPI(id.trim(), password);
+                updateStatusBar('loading');
+                vscode.window.showInformationMessage('🔄 Verifying credentials...');
+                loginResult = await callLoginAPI(id.trim(), password);
+            }
 
             if (!loginResult.success) {
                 updateStatusBar('disconnected');
@@ -800,6 +815,46 @@ function resetBehavioralState() {
 // ══════════════════════════════════════════════════════════════
 // CALL BACKEND LOGIN API
 // ══════════════════════════════════════════════════════════════
+function callGuestLoginAPI(sid) {
+    return new Promise((resolve) => {
+        const body    = JSON.stringify({ student_id: sid });
+        const options = {
+            hostname: CONFIG.SERVER_HOST,
+            port:     CONFIG.SERVER_PORT,
+            path:     '/auth/guest-login',
+            method:   'POST',
+            headers: {
+                'Content-Type':   'application/json',
+                'Content-Length': Buffer.byteLength(body),
+            },
+        };
+
+        const req = https.request(options, (res) => {
+            let data = '';
+            res.on('data', chunk => data += chunk);
+            res.on('end', () => {
+                try {
+                    const parsed = JSON.parse(data);
+                    if (res.statusCode === 200) {
+                        resolve({ success: true, token: parsed.access_token, name: parsed.full_name });
+                    } else {
+                        resolve({ success: false, message: parsed.detail || 'Guest login failed' });
+                    }
+                } catch (e) {
+                    resolve({ success: false, message: 'Server returned invalid response' });
+                }
+            });
+        });
+
+        req.on('error', (err) => {
+            resolve({ success: false, message: err.code === 'ECONNREFUSED' ? 'Cannot connect to server.' : `Connection error: ${err.message}` });
+        });
+        req.setTimeout(8000, () => { req.destroy(); resolve({ success: false, message: 'Server timeout.' }); });
+        req.write(body);
+        req.end();
+    });
+}
+
 function callLoginAPI(sid, password) {
     return new Promise((resolve) => {
         const body    = JSON.stringify({ student_id: sid, password: password });
