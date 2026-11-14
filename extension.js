@@ -12,7 +12,7 @@ const CONFIG = {
     HEARTBEAT_INTERVAL_MS:     60000,   // Heartbeat every 60 seconds
     LAB_STATUS_INTERVAL_MS:    30000,   // Ask the server if a lab is running
     IDLE_TIMEOUT_MS:           60000,   // 60 seconds no typing = idle
-    PASTE_CHAR_THRESHOLD:      10,      // 10+ chars at once = paste
+    PASTE_CHAR_THRESHOLD:      50,      // 50+ chars at once = paste (~1 meaningful line; 10 was too sensitive to normal typing)
     RAPID_TAB_COUNT:           3,       // 3 switches = suspicious
     RAPID_TAB_WINDOW_MS:       30000,   // within 30 seconds
     AI_WATCHING_SPEED:         8,       // chars/sec = fast typing
