@@ -616,7 +616,7 @@ SIMILARITY_CODE_CHARS = 4000   # cap sent per side so an O(n^2) report stays a s
 
 
 @router.get("/admin/similarity-report")
-def similarity_report(db: Session = Depends(get_db), admin=Depends(auth.get_admin_user)):
+def similarity_report(db: Session = Depends(get_db), admin=Depends(auth.get_teacher_user)):
     """Pairwise similarity between every pair of students' latest code
     snapshot, via difflib.SequenceMatcher (character-level; order-sensitive —
     catches literal copy-paste-with-edits, but a straight reorder of the same
