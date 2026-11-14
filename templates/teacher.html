@@ -205,6 +205,41 @@
       <div id="pn_ai" class="bg-gray-950 border border-gray-800 rounded-lg p-3 text-sm text-gray-500">No detection run yet.</div>
     </section>
 
+    <!-- Dual AI score (classical real-time vs transformer periodic) -->
+    <section>
+      <h3 class="text-gray-400 text-xs uppercase font-medium mb-2">AI Score Breakdown</h3>
+      <div class="grid grid-cols-2 gap-3">
+        <!-- Classical -->
+        <div class="bg-gray-950 border border-gray-800 rounded-lg p-3">
+          <div class="flex items-center justify-between mb-1">
+            <span class="text-xs font-semibold text-blue-300">⚡ Classical</span>
+            <span id="score_classical_pct" class="text-sm font-bold text-white">—</span>
+          </div>
+          <div class="w-full h-2 bg-gray-800 rounded-full overflow-hidden mb-2">
+            <div id="score_classical_bar" class="h-full bg-blue-500" style="width:0%"></div>
+          </div>
+          <div class="flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-gray-400 mb-1">
+            <span>LR: <b id="score_classical_lr" class="text-gray-200">—</b></span>
+            <span>RF: <b id="score_classical_rf" class="text-gray-200">—</b></span>
+            <span>XGB: <b id="score_classical_xgb" class="text-gray-200">—</b></span>
+          </div>
+          <p id="score_classical_updated" class="text-[11px] text-gray-600">—</p>
+        </div>
+        <!-- Transformer -->
+        <div class="bg-gray-950 border border-gray-800 rounded-lg p-3">
+          <div class="flex items-center justify-between mb-1">
+            <span class="text-xs font-semibold text-purple-300">🤖 Transformer</span>
+            <span id="score_transformer_pct" class="text-sm font-bold text-white">—</span>
+          </div>
+          <div class="w-full h-2 bg-gray-800 rounded-full overflow-hidden mb-2">
+            <div id="score_transformer_bar" class="h-full bg-purple-500" style="width:0%"></div>
+          </div>
+          <div class="h-[14px]"></div>
+          <p id="score_transformer_updated" class="text-[11px] text-gray-600">—</p>
+        </div>
+      </div>
+    </section>
+
     <!-- Behavioral signals -->
     <section>
       <h3 class="text-gray-400 text-xs uppercase font-medium mb-2">Behavioral Signals <span id="pn_tel_note" class="normal-case text-gray-600"></span></h3>
@@ -823,6 +858,7 @@ function openPanel(id) {
   document.getElementById('panel').classList.remove('closed');
   renderStudents();
   loadPanel();
+  loadAiScores(id);   // independent of /session (works even with no StudentSession row yet)
 }
 
 function closePanel() {
@@ -907,6 +943,45 @@ async function loadPanel() {
   w.innerHTML = d.warnings && d.warnings.length
     ? d.warnings.map(x => `<div class="bg-gray-950 border border-gray-800 rounded-lg px-3 py-2 text-gray-300"><span class="text-yellow-400">⚠</span> ${esc(x.message)} <span class="text-gray-600 text-xs ml-1">${esc(ago(x.created_at))}</span></div>`).join('')
     : 'None.';
+}
+
+// ── Dual AI score (classical real-time vs transformer periodic) ────
+function aiScoreBarColor(pct) {
+  // Thresholds specific to this widget: green <40%, yellow 40-70%, red >=70%.
+  if (pct >= 70) return 'bg-red-500';
+  if (pct >= 40) return 'bg-yellow-500';
+  return 'bg-green-500';
+}
+async function loadAiScores(studentId) {
+  let data;
+  try {
+    data = await api(`/teacher/student/${encodeURIComponent(studentId)}/ai-scores`);
+  } catch (e) {
+    return;   // non-fatal: the rest of the panel still works without this widget
+  }
+  if (studentId !== selectedId) return;   // user switched student meanwhile
+
+  const cl = data.classical || {};
+  const clPct = cl.score != null ? Math.max(0, Math.min(100, cl.score)) : null;
+  document.getElementById('score_classical_pct').textContent = clPct != null ? `${clPct.toFixed(1)}%` : '—';
+  const clBar = document.getElementById('score_classical_bar');
+  clBar.style.width = `${clPct ?? 0}%`;
+  clBar.className = 'h-full ' + (clPct != null ? aiScoreBarColor(clPct) : 'bg-gray-700');
+  const pct3 = (v) => v == null ? '—' : `${(v * 100).toFixed(0)}%`;
+  document.getElementById('score_classical_lr').textContent  = pct3(cl.lr_prob);
+  document.getElementById('score_classical_rf').textContent  = pct3(cl.rf_prob);
+  document.getElementById('score_classical_xgb').textContent = pct3(cl.xgb_prob);
+  document.getElementById('score_classical_updated').textContent =
+    cl.updated_at ? `Updated ${ago(cl.updated_at)}` : 'No detection run yet';
+
+  const tr = data.transformer || {};
+  const trPct = tr.score != null ? Math.max(0, Math.min(100, tr.score)) : null;
+  document.getElementById('score_transformer_pct').textContent = trPct != null ? `${trPct.toFixed(1)}%` : 'Pending';
+  const trBar = document.getElementById('score_transformer_bar');
+  trBar.style.width = `${trPct ?? 0}%`;
+  trBar.className = 'h-full ' + (trPct != null ? aiScoreBarColor(trPct) : 'bg-gray-700');
+  document.getElementById('score_transformer_updated').textContent =
+    tr.updated_at ? `Updated ${ago(tr.updated_at)}` : 'Pending (≤10 min)';
 }
 
 // ── label form ─────────────────────────────────────────────────
@@ -1058,7 +1133,8 @@ async function refreshAll() {
   refreshing = true;
   const dot = document.getElementById('refresh_dot'), text = document.getElementById('refresh_text');
   try {
-    await Promise.all([loadClasses(), loadStudents(), loadSummary(), loadExam(), selectedId ? loadPanel() : null]);
+    await Promise.all([loadClasses(), loadStudents(), loadSummary(), loadExam(),
+      selectedId ? loadPanel() : null, selectedId ? loadAiScores(selectedId) : null]);
     dot.className = 'w-2 h-2 rounded-full bg-green-400';
     text.textContent = 'Auto-refresh 10s · updated ' + new Date().toLocaleTimeString();
   } catch (e) {

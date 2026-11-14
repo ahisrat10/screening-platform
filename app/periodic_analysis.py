@@ -56,6 +56,7 @@ def _run_periodic_analysis():
             try:
                 prob = call_hf_inference_api(UNIXCODER_HF_REPO, snap.code)
                 snap.ai_score = int(round(prob * 100))
+                snap.ai_score_updated_at = datetime.now(timezone.utc)
                 db.add(snap)
                 logger.debug(
                     "Periodic: student=%s snapshot=%d score=%d",

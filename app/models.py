@@ -202,6 +202,10 @@ class CodeSnapshot(Base):
     code            = Column(String)
     line_count      = Column(Integer, default=0)
     ai_score        = Column(Integer, default=0)
+    # When the periodic transformer job last scored this snapshot. ai_score
+    # itself defaults to 0 (not NULL), so this is what distinguishes "never
+    # analyzed yet" (NULL) from "analyzed, genuinely scored near 0%".
+    ai_score_updated_at = Column(DateTime, nullable=True)
     snapshot_number = Column(Integer, default=0)
     timestamp       = Column(DateTime, server_default=func.now())
 

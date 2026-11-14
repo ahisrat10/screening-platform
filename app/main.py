@@ -11,7 +11,7 @@ from starlette.requests import Request
 
 from .database import engine, get_db
 from . import models, schemas, auth
-from .teacher import router as teacher_router
+from .teacher import router as teacher_router, _require_visible as _teacher_require_visible
 from .export import router as export_router
 from .classes import router as classes_router, ai_detection_allowed
 from .email_service import generate_otp, save_otp, send_otp_email, send_welcome_email
@@ -32,6 +32,7 @@ def _run_light_migrations(engine):
         "ALTER TABLE correction_memory ADD COLUMN IF NOT EXISTS student_id VARCHAR(50) REFERENCES users(student_id)",
         "ALTER TABLE correction_memory ADD COLUMN IF NOT EXISTS teacher_id VARCHAR(50) REFERENCES users(student_id)",
         "ALTER TABLE correction_memory ADD COLUMN IF NOT EXISTS agreed BOOLEAN",
+        "ALTER TABLE code_snapshots ADD COLUMN IF NOT EXISTS ai_score_updated_at TIMESTAMP",
     ]
     # AUTOCOMMIT + one connection per statement: a failed ALTER (e.g. on a
     # non-Postgres dev DB) must not abort the transaction for the rest.
@@ -943,6 +944,59 @@ def analyze_ai_detection(
     })
 
     return result
+
+
+@app.get("/teacher/student/{student_id}/ai-scores")
+def get_student_ai_scores(
+    student_id: str,
+    current_user=Depends(auth.get_teacher_user),
+    db: Session = Depends(get_db),
+):
+    """Dual AI score for the teacher dashboard:
+    - classical: the latest /analyze/ai-detection run (Submission row) — LR/RF/XGB
+      breakdown + blended probability, computed synchronously on every snapshot.
+    - transformer: the latest CodeSnapshot.ai_score, refreshed every ~10 min by
+      the periodic background job (periodic_analysis.py) via the HF Inference API.
+    There is no separate AIDetectionLog table in this schema — the classical
+    scores already live on Submission.model_scores, so that is used directly.
+    """
+    _teacher_require_visible(db, current_user, student_id)
+
+    sub = (
+        db.query(models.Submission)
+        .filter(
+            models.Submission.student_id == student_id,
+            models.Submission.ai_probability.isnot(None),
+        )
+        .order_by(models.Submission.timestamp.desc(), models.Submission.id.desc())
+        .first()
+    )
+    scores = (sub.model_scores or {}) if sub else {}
+    classical = {
+        "score":      round(sub.ai_probability * 100, 1) if sub and sub.ai_probability is not None else None,
+        "prediction": sub.ai_prediction if sub else None,
+        "lr_prob":    scores.get("logistic_regression"),
+        "rf_prob":    scores.get("random_forest"),
+        "xgb_prob":   scores.get("xgboost"),
+        "updated_at": sub.timestamp.isoformat() if sub and sub.timestamp else None,
+    }
+
+    snap = (
+        db.query(models.CodeSnapshot)
+        .filter(models.CodeSnapshot.student_id == student_id)
+        .order_by(models.CodeSnapshot.timestamp.desc(), models.CodeSnapshot.id.desc())
+        .first()
+    )
+    # Pending (never analyzed by the periodic job yet) vs a genuine score:
+    # ai_score_updated_at is NULL until the job actually scores this row.
+    has_transformer_score = bool(snap and snap.ai_score_updated_at)
+    transformer = {
+        "score":      snap.ai_score if has_transformer_score else None,
+        "updated_at": snap.ai_score_updated_at.isoformat() if has_transformer_score else None,
+    }
+
+    return {"classical": classical, "transformer": transformer}
+
 
 # ══════════════════════════════════════════════════════════════
 # TEACHER FEEDBACK ROUTE (per-submission AI/Human correction)
