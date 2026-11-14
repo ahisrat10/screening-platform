@@ -236,6 +236,15 @@ class EventData(BaseModel):
     details:     Optional[dict] = None
     timestamp:   str
 
+class BatchEventItem(BaseModel):
+    event_type: str
+    severity:   str
+    details:    Optional[dict] = None
+    timestamp:  str
+
+class BatchEventsRequest(BaseModel):
+    events: list[BatchEventItem]
+
 class CodeData(BaseModel):
     student_id:      str
     filename:        str

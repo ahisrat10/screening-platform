@@ -606,6 +606,31 @@ def student_event(
     return {"status": "event_recorded"}
 
 
+@app.post("/student/batch-events")
+def batch_events(
+    data:             schemas.BatchEventsRequest,
+    db:               Session = Depends(get_db),
+    token_student_id: str     = Depends(get_student_from_token)
+):
+    # Low-priority behavioral events (file switches, cursor jumps, rename
+    # detection, brief window blur/refocus) that the extension queues
+    # client-side and flushes every 2 minutes instead of posting one at a
+    # time. There's no separate BehavioralEvent table, so each item is
+    # stored the same way a single /student/event call would store it —
+    # just without the live broadcast, since a 2-minute-old batch isn't
+    # useful on the teacher's real-time monitor.
+    for item in data.events:
+        db.add(models.StudentEvent(
+            student_id = token_student_id,
+            event_type = item.event_type,
+            severity   = item.severity,
+            details    = json.dumps(item.details) if item.details else "{}"
+        ))
+    db.commit()
+
+    return {"received": len(data.events)}
+
+
 def _apply_delta_ops(old_code: str, ops: list) -> str:
     """Reconstruct full text from an ordered edit script of {start, removed, added}
     hunks (positions are against old_lines, as produced by the extension's
