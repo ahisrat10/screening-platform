@@ -240,11 +240,18 @@ class CodeData(BaseModel):
     student_id:      str
     filename:        str
     language:        str
-    code:            str
+    code:            Optional[str] = None
+    delta:           Optional[dict] = None
     line_count:      int
     analysis:        Optional[dict] = None
     snapshot_number: int
     timestamp:       str
+
+    @model_validator(mode="after")
+    def require_code_or_delta(self):
+        if self.code is None and self.delta is None:
+            raise ValueError("either 'code' or 'delta' must be provided")
+        return self
 
 class HeartbeatData(BaseModel):
     student_id:        str

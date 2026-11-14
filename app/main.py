@@ -606,6 +606,29 @@ def student_event(
     return {"status": "event_recorded"}
 
 
+def _apply_delta_ops(old_code: str, ops: list) -> str:
+    """Reconstruct full text from an ordered edit script of {start, removed, added}
+    hunks (positions are against old_lines, as produced by the extension's
+    line-level diff). Raises ValueError on a malformed/out-of-order script."""
+    old_lines = old_code.split("\n")
+    n = len(old_lines)
+    result = []
+    cursor = 0
+    for op in ops:
+        start = op.get("start")
+        removed = op.get("removed", 0)
+        added = op.get("added", [])
+        if not isinstance(start, int) or not isinstance(removed, int) or not isinstance(added, list):
+            raise ValueError("malformed delta op")
+        if start < cursor or start > n or start + removed > n:
+            raise ValueError("delta op out of range or out of order")
+        result.extend(old_lines[cursor:start])
+        cursor = start + removed
+        result.extend(added)
+    result.extend(old_lines[cursor:])
+    return "\n".join(result)
+
+
 @app.post("/student/submit-code")
 def submit_code(
     data:             schemas.CodeData,
@@ -619,11 +642,30 @@ def submit_code(
     if data.analysis:
         ai_score = data.analysis.get("ai_score", 0)
 
+    if data.code is not None:
+        code = data.code
+    else:
+        prev = (
+            db.query(models.CodeSnapshot)
+            .filter(
+                models.CodeSnapshot.student_id == data.student_id,
+                models.CodeSnapshot.filename == data.filename,
+            )
+            .order_by(models.CodeSnapshot.id.desc())
+            .first()
+        )
+        if not prev:
+            raise HTTPException(status_code=400, detail="No previous snapshot to apply delta to")
+        try:
+            code = _apply_delta_ops(prev.code, data.delta.get("ops", []))
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=f"Invalid delta: {e}")
+
     snapshot = models.CodeSnapshot(
         student_id      = data.student_id,
         filename        = data.filename,
         language        = data.language,
-        code            = data.code,
+        code            = code,
         line_count      = data.line_count,
         ai_score        = ai_score,
         snapshot_number = data.snapshot_number
