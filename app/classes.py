@@ -611,41 +611,20 @@ def db_stats(db: Session = Depends(get_db), admin=Depends(auth.get_admin_user)):
     }
 
 
-_TOKEN_SPLIT_RE = re.compile(r"\s+")
-_PUNCT_RE = re.compile(r"[^\w\s]")
-_LINE_COMMENT_RE = re.compile(r"(^|\n)\s*(//|#).*", re.MULTILINE)
-
-
-def _tokenize_for_similarity(code: str) -> set:
-    """Same normalization as the extension's computeCodeTokensHash (lowercase,
-    strip // and # comments, punctuation -> space, split, drop empties) but
-    returns the token SET (not a hash) so Jaccard similarity can be computed."""
-    if not code:
-        return set()
-    text = code.lower()
-    text = _LINE_COMMENT_RE.sub("", text)
-    text = _PUNCT_RE.sub(" ", text)
-    return {t for t in _TOKEN_SPLIT_RE.split(text) if t}
-
-
-def _jaccard(a: set, b: set) -> float:
-    if not a and not b:
-        return 0.0
-    union = a | b
-    if not union:
-        return 0.0
-    return len(a & b) / len(union)
-
-
 SIMILARITY_THRESHOLD = 0.7
-SIMILARITY_SNIPPET_CHARS = 500
+SIMILARITY_CODE_CHARS = 4000   # cap sent per side so an O(n^2) report stays a sane payload
 
 
 @router.get("/admin/similarity-report")
 def similarity_report(db: Session = Depends(get_db), admin=Depends(auth.get_admin_user)):
-    """Pairwise Jaccard similarity (on code token sets) between every pair
-    of students' final submitted code. Flags likely copy-paste between
-    students (not same-file paste, which the extension already scores)."""
+    """Pairwise similarity between every pair of students' latest code
+    snapshot, via difflib.SequenceMatcher (character-level; order-sensitive —
+    catches literal copy-paste-with-edits, but a straight reorder of the same
+    lines scores lower here than it would under a token-set/Jaccard measure).
+    Flags pairs scoring >= 0.7 (not same-file paste, which the extension
+    scores separately client-side)."""
+    import difflib
+
     students = db.query(models.User).filter(models.User.role == "student").all()
 
     # One code sample per student: their most recent code snapshot.
@@ -657,30 +636,25 @@ def similarity_report(db: Session = Depends(get_db), admin=Depends(auth.get_admi
         if snap and snap.code and snap.code.strip():
             final_code[s.student_id] = snap.code
 
-    token_sets = {sid: _tokenize_for_similarity(code) for sid, code in final_code.items()}
     ids = list(final_code.keys())
 
     pairs = []
     for i in range(len(ids)):
         for j in range(i + 1, len(ids)):
             sid1, sid2 = ids[i], ids[j]
-            score = _jaccard(token_sets[sid1], token_sets[sid2])
-            if score > SIMILARITY_THRESHOLD:
+            code1, code2 = final_code[sid1], final_code[sid2]
+            score = difflib.SequenceMatcher(None, code1, code2, autojunk=False).ratio()
+            if score >= SIMILARITY_THRESHOLD:
                 pairs.append({
-                    "student_id_1":     sid1,
-                    "student_id_2":     sid2,
-                    "similarity_score": round(score, 4),
-                    "code_snippet_1":   final_code[sid1][:SIMILARITY_SNIPPET_CHARS],
-                    "code_snippet_2":   final_code[sid2][:SIMILARITY_SNIPPET_CHARS],
+                    "student_a":  sid1,
+                    "student_b":  sid2,
+                    "similarity": round(score, 4),
+                    "code_a":     code1[:SIMILARITY_CODE_CHARS],
+                    "code_b":     code2[:SIMILARITY_CODE_CHARS],
                 })
-    pairs.sort(key=lambda p: p["similarity_score"], reverse=True)
+    pairs.sort(key=lambda p: p["similarity"], reverse=True)
 
-    return {
-        "threshold":       SIMILARITY_THRESHOLD,
-        "students_checked": len(ids),
-        "pairs_flagged":    len(pairs),
-        "pairs":            pairs,
-    }
+    return {"pairs": pairs}
 
 
 def _count(q) -> int:
