@@ -39,7 +39,6 @@ let studentId           = null;
 let jwtToken            = null;
 let isConnected         = false;
 let statusBarItem       = null;
-let snapshotTimer       = null;
 let heartbeatTimer      = null;
 let idleTimer           = null;
 let keystrokeTimestamps = [];
@@ -103,6 +102,8 @@ let scrollDebounceTimer     = null;
 let pendingTextChangeEvents = [];               // buffered events awaiting the 500ms batch flush
 let lastEnterTime           = 0;                // Enter-key batching (collapse rapid duplicate Enters)
 let lastSnapshotCode        = '';               // skip sending a snapshot identical to the last one
+let lastSnapshotLines       = null;             // array of lines from the last snapshot sent (for delta encoding)
+let linesChangedSinceSnapshot = 0;              // smart trigger: added+removed lines since the last snapshot
 
 // ══════════════════════════════════════════════════════════════
 // ACTIVATE
@@ -325,9 +326,24 @@ function activate(context) {
                 pendingTextChangeEvents = [];
                 keystrokeDebounceTimer = null;
                 events.forEach(processTextChangeEvent);
+                events.forEach(trackSmartSnapshotTrigger);
+                if (linesChangedSinceSnapshot >= 5) {
+                    sendCodeSnapshot();
+                }
             }, 500);
         }
     );
+
+    // ── Smart snapshot trigger: count added+removed lines since the
+    // last snapshot (from the raw edit ranges, not a full-document
+    // diff — cheap enough to run on every batch of edits). ─────────
+    function trackSmartSnapshotTrigger(event) {
+        for (const change of event.contentChanges) {
+            const removedLines = change.range.end.line - change.range.start.line;
+            const addedLines    = (change.text.match(/\n/g) || []).length;
+            linesChangedSinceSnapshot += removedLines + addedLines;
+        }
+    }
 
     function processTextChangeEvent(event) {
             const now = Date.now();
@@ -762,7 +778,6 @@ function activate(context) {
 // START / STOP MONITORING
 // ══════════════════════════════════════════════════════════════
 function startMonitoring() {
-    snapshotTimer  = setInterval(sendCodeSnapshot, CONFIG.SNAPSHOT_INTERVAL_MS);
     heartbeatTimer = setInterval(sendHeartbeat, CONFIG.HEARTBEAT_INTERVAL_MS);
     kpmTimer       = setInterval(sampleKeysPerMinute, CONFIG.KPM_SAMPLE_INTERVAL_MS);
     freezeTimer    = setInterval(checkScreenFreeze, CONFIG.FREEZE_CHECK_INTERVAL_MS);
@@ -772,13 +787,12 @@ function startMonitoring() {
 }
 
 function stopMonitoring() {
-    clearInterval(snapshotTimer);
     clearInterval(heartbeatTimer);
     clearInterval(kpmTimer);
     clearInterval(freezeTimer);
     clearInterval(labTimer);
     clearTimeout(idleTimer);
-    snapshotTimer = heartbeatTimer = kpmTimer = freezeTimer = idleTimer = labTimer = null;
+    heartbeatTimer = kpmTimer = freezeTimer = idleTimer = labTimer = null;
     examMode  = false;
     activeLab = null;
 }
@@ -810,6 +824,8 @@ function resetBehavioralState() {
     lastAIDetectionResult   = null;
     lastCodeTokensHash      = null;
     lastSnapshotCode        = '';
+    lastSnapshotLines       = null;
+    linesChangedSinceSnapshot = 0;
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -924,7 +940,53 @@ function callLoginAPI(sid, password) {
 }
 
 // ══════════════════════════════════════════════════════════════
-// SEND CODE SNAPSHOT — every 30 seconds
+// LINE-LEVEL DIFF (git-style delta snapshots)
+// Produces an ordered edit script — hunks of {start, removed, added}
+// positioned against oldLines — so the backend can deterministically
+// reconstruct the new full text. Returns null if the document is too
+// large to diff cheaply; caller falls back to sending the full code.
+// ══════════════════════════════════════════════════════════════
+function diffLines(oldLines, newLines) {
+    const n = oldLines.length, m = newLines.length;
+    if (n * m > 2000000) return null;
+
+    const dp = new Array(n + 1);
+    for (let i = 0; i <= n; i++) dp[i] = new Int32Array(m + 1);
+    for (let i = n - 1; i >= 0; i--) {
+        for (let j = m - 1; j >= 0; j--) {
+            dp[i][j] = oldLines[i] === newLines[j]
+                ? dp[i + 1][j + 1] + 1
+                : Math.max(dp[i + 1][j], dp[i][j + 1]);
+        }
+    }
+
+    const ops = [];
+    let i = 0, j = 0;
+    while (i < n || j < m) {
+        if (i < n && j < m && oldLines[i] === newLines[j]) {
+            i++; j++;
+            continue;
+        }
+        const start = i;
+        let removed = 0;
+        const added = [];
+        while (i < n || j < m) {
+            if (i < n && j < m && oldLines[i] === newLines[j]) break;
+            if (i < n && (j >= m || dp[i + 1][j] >= dp[i][j + 1])) {
+                removed++; i++;
+            } else if (j < m) {
+                added.push(newLines[j]); j++;
+            } else {
+                break;
+            }
+        }
+        ops.push({ start, removed, added });
+    }
+    return ops;
+}
+
+// ══════════════════════════════════════════════════════════════
+// SEND CODE SNAPSHOT — triggered once 5+ lines have changed
 // This counts as a "code submission", so it also triggers AI detection.
 // ══════════════════════════════════════════════════════════════
 function sendCodeSnapshot() {
@@ -964,12 +1026,26 @@ function sendCodeSnapshot() {
     }
     previousSnapshotScore = analysis.ai_score;
 
+    const lines = code.split('\n');
+    let codeField  = code;
+    let deltaField = undefined;
+    if (lastSnapshotLines !== null) {
+        const ops = diffLines(lastSnapshotLines, lines);
+        if (ops !== null) {
+            codeField  = undefined;
+            deltaField = { ops };
+        }
+    }
+    lastSnapshotLines         = lines;
+    linesChangedSinceSnapshot = 0;
+
     sendToServer('/student/submit-code', {
         student_id:      studentId,
         filename:        editor.document.fileName,
         language:        editor.document.languageId,
-        code:            code,
-        line_count:      code.split('\n').length,
+        code:            codeField,
+        delta:           deltaField,
+        line_count:      lines.length,
         analysis:        analysis,
         code_fingerprint: computeCodeFingerprint(code), // Same Code As Classmate (server-side match)
         code_tokens_hash: computeCodeTokensHash(code),  // Similarity Report (token-set hash)
