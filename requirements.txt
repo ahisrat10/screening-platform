@@ -14,4 +14,5 @@ xgboost>=2.0
 torch>=2.2
 numpy>=1.26
 transformers>=4.40
-safetensors>=0.4
+safetensors>=0.4requests>=2.31
+apscheduler>=3.10

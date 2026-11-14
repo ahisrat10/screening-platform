@@ -90,7 +90,10 @@ async def lifespan(app: FastAPI):
     global main_loop
     main_loop = asyncio.get_event_loop()
     print("Server started. Event loop captured for WebSocket broadcasting.")
+    from app.periodic_analysis import start_scheduler, stop_scheduler
+    start_scheduler()
     yield
+    stop_scheduler()
     print("Server shutting down.")
 
 # ══════════════════════════════════════════════════════════════
@@ -842,10 +845,21 @@ def analyze_ai_detection(
         raise HTTPException(status_code=403, detail="AI detection is turned off for your class")
     behavioral_dict = data.behavioral.model_dump()
 
+    # Fetch latest transformer score from periodic analysis (ai_score 0-100)
+    from sqlalchemy import func as sqlfunc
+    latest_snap = (
+        db.query(models.CodeSnapshot)
+        .filter(models.CodeSnapshot.student_id == student_id)
+        .order_by(models.CodeSnapshot.id.desc())
+        .first()
+    )
+    transformer_score = (latest_snap.ai_score / 100.0) if (latest_snap and latest_snap.ai_score) else None
+
     result = predict_ai_detection(
         code               = data.code,
         language           = data.language,
         behavioral_signals = behavioral_dict,
+        transformer_score  = transformer_score,
     )
     code_features = result.get("code_features") or {}
     # Signals mapped onto the DB/profile column names (see ml/behavioral.py).

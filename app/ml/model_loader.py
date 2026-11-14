@@ -1,6 +1,12 @@
 """
-Loads all classical models, scalers, and the Fusion ANN checkpoint once at
+Loads classical models, scalers, and the Fusion ANN checkpoint once at
 import time and exposes a single `predict_ai_detection()` entry point.
+
+Transformer models (CodeBERT / UniXcoder) are NOT loaded locally.
+They are called via the HuggingFace Inference API in a periodic background
+job (see periodic_analysis.py).  During a normal /analyze/ai-detection
+request, any stored transformer_score for the student is blended in; if none
+is available yet, placeholder 0.5 is used.
 """
 import io
 import logging
@@ -17,21 +23,17 @@ from .behavioral import behavioral_risk_score, has_behavioral_data, normalize_be
 logger = logging.getLogger(__name__)
 
 MODELS_DIR = os.path.join(os.path.dirname(__file__), "models")
-CODEBERT_DIR = os.path.join(MODELS_DIR, "codebert", "final_model")
-UNIXCODER_DIR = os.path.join(MODELS_DIR, "unixcoder", "final_model")
 
-# Fallback source when the local checkpoint folders aren't present (e.g. on
-# Railway, where the ~950MB of weights aren't shipped in the image).
-CODEBERT_HF_REPO = "ahisrat10/codebert-ai-detector"
-UNIXCODER_HF_REPO = "ahisrat10/unixcoder-ai-detector"
-
-# Only needed if those HF repos are private.
-HF_TOKEN = os.getenv("HF_TOKEN") or None
-
-TRANSFORMER_MAX_LENGTH = 512
+# HuggingFace Inference API endpoints (serverless, free tier)
+CODEBERT_HF_REPO  = os.getenv("CODEBERT_HF_REPO",  "ahisrat10/codebert-ai-detector")
+UNIXCODER_HF_REPO = os.getenv("UNIXCODER_HF_REPO", "ahisrat10/unixcoder-ai-detector")
+HF_TOKEN          = os.getenv("HF_TOKEN") or None
 
 # Weight of the behavioral heuristic in the final ai_probability.
 BEHAVIORAL_BLEND = 0.15
+
+# Placeholder used when transformer score is not yet available
+_TRANSFORMER_PLACEHOLDER = 0.5
 
 
 def _load_pickle(name: str):
@@ -40,12 +42,6 @@ def _load_pickle(name: str):
 
 
 def _load_fusion_state_dict(dir_name: str) -> dict:
-    """
-    fusion_ann_v3 was saved with torch.save() and is on disk as an already
-    -unzipped PyTorch archive directory (data.pkl + data/0..N + version).
-    torch.load() only accepts a file, so we re-zip it into an in-memory
-    buffer with the archive-name prefix PyTorch's zip format requires.
-    """
     src = os.path.join(MODELS_DIR, dir_name)
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w") as zf:
@@ -60,11 +56,11 @@ def _load_fusion_state_dict(dir_name: str) -> dict:
 
 # ── Load once at import time ────────────────────────────────────
 xgb_model = _load_pickle("XGBoost.pkl")
-rf_model = _load_pickle("RandomForest.pkl")
-lr_model = _load_pickle("LogisticRegression.pkl")
+rf_model  = _load_pickle("RandomForest.pkl")
+lr_model  = _load_pickle("LogisticRegression.pkl")
 
 scaler_classical = _load_pickle("scaler_classical.pkl")
-scaler_fusion = _load_pickle("scaler_fusion.pkl")
+scaler_fusion    = _load_pickle("scaler_fusion.pkl")
 
 fusion_model = FusionANN(input_dim=33)
 fusion_model.load_state_dict(_load_fusion_state_dict("fusion_ann_v3"))
@@ -72,148 +68,123 @@ fusion_model.eval()
 
 FUSION_FEATURE_NAMES = _load_pickle("feature_names.pkl")
 
-# Fallback used for a transformer whenever it fails to load or run.
-_TRANSFORMER_PLACEHOLDER = 0.5
+logger.info("Classical models + Fusion ANN loaded (transformers deferred to HF API)")
 
 
-def _has_local_checkpoint(model_dir: str) -> bool:
-    # A HF checkpoint dir needs at least a config and some weights file;
-    # just checking the directory exists isn't enough (e.g. an empty folder
-    # left behind by a partial git checkout).
-    if not os.path.isdir(model_dir):
-        return False
-    names = set(os.listdir(model_dir))
-    has_weights = any(n.endswith((".safetensors", ".bin")) for n in names)
-    return "config.json" in names and has_weights
+# ── HuggingFace Inference API ────────────────────────────────────
 
-
-def _load_transformer(model_dir: str, hf_repo: str, name: str):
-    """Load a tokenizer + sequence-classification model.
-
-    Tries the local checkpoint folder first (local dev, where the weights
-    are on disk); if that isn't present, falls back to the model's HF Hub
-    repo (Railway, which doesn't ship the ~450MB weight files in the image).
-    Returns (tokenizer, model), or (None, None) if both fail — callers fall
-    back to _TRANSFORMER_PLACEHOLDER in that case.
+def call_hf_inference_api(hf_repo: str, code: str, timeout: int = 20) -> float:
     """
-    from transformers import AutoModelForSequenceClassification, AutoTokenizer
+    Call the HuggingFace Inference API for a text-classification model.
+    Returns probability of class 1 (AI-generated), or 0.5 on any error.
+    """
+    import requests
 
-    source = model_dir if _has_local_checkpoint(model_dir) else hf_repo
-    if source is hf_repo:
-        logger.info("No local checkpoint at %s; loading %s from Hugging Face Hub (%s)", model_dir, name, hf_repo)
+    url     = f"https://api-inference.huggingface.co/models/{hf_repo}"
+    headers = {"Content-Type": "application/json"}
+    if HF_TOKEN:
+        headers["Authorization"] = f"Bearer {HF_TOKEN}"
+
+    payload = {"inputs": code[:1800]}
 
     try:
-        tokenizer = AutoTokenizer.from_pretrained(source, token=HF_TOKEN)
-        model = AutoModelForSequenceClassification.from_pretrained(source, token=HF_TOKEN)
-        model.eval()
-        return tokenizer, model
-    except Exception:
-        logger.warning("Failed to load %s model from %s; falling back to placeholder 0.5", name, source, exc_info=True)
-        return None, None
-
-
-codebert_tokenizer, codebert_model = _load_transformer(CODEBERT_DIR, CODEBERT_HF_REPO, "CodeBERT")
-unixcoder_tokenizer, unixcoder_model = _load_transformer(UNIXCODER_DIR, UNIXCODER_HF_REPO, "UniXcoder")
-
-
-def _transformer_prob(tokenizer, model, code: str) -> float:
-    """Probability (class 1 = AI-generated) from a loaded transformer, or
-    the placeholder if the model/tokenizer isn't available."""
-    if tokenizer is None or model is None:
+        resp = requests.post(url, json=payload, headers=headers, timeout=timeout)
+        if resp.status_code == 503:
+            logger.info("HF model %s loading (503); will retry next cycle", hf_repo)
+            return _TRANSFORMER_PLACEHOLDER
+        resp.raise_for_status()
+        results = resp.json()
+        if isinstance(results, list):
+            for item in results:
+                if isinstance(item, dict) and item.get("label") in ("LABEL_1", "1", "AI"):
+                    return float(item["score"])
+            label1 = next((x for x in results if "1" in str(x.get("label", ""))), None)
+            if label1:
+                return float(label1["score"])
         return _TRANSFORMER_PLACEHOLDER
-
-    try:
-        inputs = tokenizer(
-            code,
-            return_tensors="pt",
-            truncation=True,
-            padding=True,
-            max_length=TRANSFORMER_MAX_LENGTH,
-        )
-        with torch.no_grad():
-            logits = model(**inputs).logits
-            probs = torch.softmax(logits, dim=-1)
-        return float(probs[0][1].item())
     except Exception:
-        logger.warning("Transformer inference failed; falling back to placeholder 0.5", exc_info=True)
+        logger.warning("HF Inference API call failed for %s", hf_repo, exc_info=True)
         return _TRANSFORMER_PLACEHOLDER
 
 
-def _transformer_scores(code: str):
-    codebert_prob = _transformer_prob(codebert_tokenizer, codebert_model, code)
-    unixcoder_prob = _transformer_prob(unixcoder_tokenizer, unixcoder_model, code)
-    return codebert_prob, unixcoder_prob
-
+# ── Classical scoring ────────────────────────────────────────────
 
 def _classical_scores(feature_vector):
-    """feature_vector: list[float] in FEATURE_COLUMNS order (unscaled)."""
     import numpy as np
-
-    x_raw = np.array([feature_vector], dtype=float)
+    x_raw    = np.array([feature_vector], dtype=float)
     x_scaled = scaler_classical.transform(x_raw)
-
-    lr_prob = float(lr_model.predict_proba(x_scaled)[0][1])
-    rf_prob = float(rf_model.predict_proba(x_scaled)[0][1])
+    lr_prob  = float(lr_model.predict_proba(x_scaled)[0][1])
+    rf_prob  = float(rf_model.predict_proba(x_scaled)[0][1])
     xgb_prob = float(xgb_model.predict_proba(x_scaled)[0][1])
     return lr_prob, rf_prob, xgb_prob
 
 
-def _fusion_score(lr_prob, rf_prob, xgb_prob, codebert_prob, unixcoder_prob, code_features: dict, behavioral: dict):
+def _fusion_score(lr_prob, rf_prob, xgb_prob, codebert_prob, unixcoder_prob,
+                  code_features: dict, behavioral: dict):
     import numpy as np
-
     row = {
-        "lr_prob": lr_prob,
-        "rf_prob": rf_prob,
-        "xgb_prob": xgb_prob,
-        "codebert_prob": codebert_prob,
+        "lr_prob":        lr_prob,
+        "rf_prob":        rf_prob,
+        "xgb_prob":       xgb_prob,
+        "codebert_prob":  codebert_prob,
         "unixcoder_prob": unixcoder_prob,
         **code_features,
         **behavioral,
     }
-    ordered = [row[name] for name in FUSION_FEATURE_NAMES]
-
-    x_raw = np.array([ordered], dtype=float)
+    ordered  = [row[name] for name in FUSION_FEATURE_NAMES]
+    x_raw    = np.array([ordered], dtype=float)
     x_scaled = scaler_fusion.transform(x_raw)
-
     with torch.no_grad():
         logit = fusion_model(torch.tensor(x_scaled, dtype=torch.float32))
-        prob = torch.sigmoid(logit).item()
+        prob  = torch.sigmoid(logit).item()
     return prob
 
 
-def predict_ai_detection(code: str, language: str, behavioral_signals: dict) -> dict:
-    code_features = extract_features(code, language)
+# ── Main prediction entry point ──────────────────────────────────
+
+def predict_ai_detection(
+    code: str,
+    language: str,
+    behavioral_signals: dict,
+    transformer_score=None,
+) -> dict:
+    """
+    Returns AI detection result using classical models + Fusion ANN.
+    transformer_score (0-1 float): pre-computed transformer probability stored
+    in DB by the periodic background job.  If None, placeholder 0.5 is used.
+    """
+    code_features  = extract_features(code, language)
     feature_vector = [code_features[col] for col in FEATURE_COLUMNS]
 
     lr_prob, rf_prob, xgb_prob = _classical_scores(feature_vector)
-    codebert_prob, unixcoder_prob = _transformer_scores(code)
 
-    # Accept the extension's field names (total_pastes, total_tab_switches,
-    # backspace_frequency, suspicious_score, ...) as well as the legacy ones.
+    codebert_prob  = transformer_score if transformer_score is not None else _TRANSFORMER_PLACEHOLDER
+    unixcoder_prob = transformer_score if transformer_score is not None else _TRANSFORMER_PLACEHOLDER
+
     sig = normalize_behavioral_signals(behavioral_signals)
 
-    # The fusion ANN was trained on exactly these five behavioral inputs.
     behavioral = {
-        "paste_count": sig["paste_count"],
-        "typing_ratio": sig["typing_ratio"],
-        "tab_switch": sig["tab_switches"],
-        "backspace_freq": sig["backspace_freq"],
+        "paste_count":     sig["paste_count"],
+        "typing_ratio":    sig["typing_ratio"],
+        "tab_switch":      sig["tab_switches"],
+        "backspace_freq":  sig["backspace_freq"],
         "suspicion_score": sig["suspicion_score"],
     }
 
-    fusion_prob = _fusion_score(lr_prob, rf_prob, xgb_prob, codebert_prob, unixcoder_prob, code_features, behavioral)
+    fusion_prob = _fusion_score(
+        lr_prob, rf_prob, xgb_prob,
+        codebert_prob, unixcoder_prob,
+        code_features, behavioral,
+    )
 
     ai_probability = (
-        lr_prob * 0.10
-        + rf_prob * 0.25
+        lr_prob  * 0.10
+        + rf_prob  * 0.25
         + xgb_prob * 0.30
-        + codebert_prob * 0.175
+        + codebert_prob  * 0.175
         + unixcoder_prob * 0.175
     )
 
-    # The fusion ANN can only see 5 behavioral inputs (fixed at training
-    # time), so the remaining signals feed a separate heuristic risk score
-    # that is blended in only when the client actually sent telemetry.
     behavioral_risk, behavioral_breakdown = behavioral_risk_score(sig)
     behavioral_used = has_behavioral_data(sig)
     if behavioral_used:
@@ -221,41 +192,32 @@ def predict_ai_detection(code: str, language: str, behavioral_signals: dict) -> 
 
     prediction = "AI" if ai_probability >= 0.5 else "Human"
 
-    placeholders_used = []
-    if codebert_model is None:
-        placeholders_used.append("codebert_prob")
-    if unixcoder_model is None:
-        placeholders_used.append("unixcoder_prob")
-
-    if placeholders_used:
-        notes = (
-            f"{' and '.join(placeholders_used)} could not be loaded and used the "
-            "placeholder value (0.5); fusion score quality is reduced until the "
-            "checkpoint is fixed."
-        )
-    else:
-        notes = "All model scores, including codebert_prob and unixcoder_prob, are from loaded checkpoints."
-
+    transformer_note = (
+        f"Transformer score from last periodic analysis: {transformer_score:.3f}"
+        if transformer_score is not None
+        else "Transformer score not yet available; placeholder 0.5 used. Will update in <= 10 min."
+    )
     if behavioral_used:
-        notes += f" Behavioral risk score {behavioral_risk} (11 signals) blended at {BEHAVIORAL_BLEND:.0%}."
+        transformer_note += f" Behavioral risk {behavioral_risk:.3f} blended at {BEHAVIORAL_BLEND:.0%}."
     else:
-        notes += " No behavioral telemetry received; behavioral score not applied."
+        transformer_note += " No behavioral telemetry received."
 
     return {
-        "prediction": prediction,
-        "confidence": round(ai_probability if prediction == "AI" else 1 - ai_probability, 4),
-        "ai_probability": round(ai_probability, 4),
+        "prediction":           prediction,
+        "confidence":           round(ai_probability if prediction == "AI" else 1 - ai_probability, 4),
+        "ai_probability":       round(ai_probability, 4),
         "model_scores": {
             "logistic_regression": round(lr_prob, 4),
-            "random_forest": round(rf_prob, 4),
-            "xgboost": round(xgb_prob, 4),
-            "codebert": round(codebert_prob, 4),
-            "unixcoder": round(unixcoder_prob, 4),
-            "fusion_ann": round(fusion_prob, 4),
+            "random_forest":       round(rf_prob, 4),
+            "xgboost":             round(xgb_prob, 4),
+            "codebert":            round(codebert_prob, 4),
+            "unixcoder":           round(unixcoder_prob, 4),
+            "fusion_ann":          round(fusion_prob, 4),
         },
-        "code_features": code_features,
-        "behavioral_risk": behavioral_risk,
+        "code_features":        code_features,
+        "behavioral_risk":      behavioral_risk,
         "behavioral_breakdown": behavioral_breakdown,
-        "behavioral_signals": sig,
-        "notes": notes,
+        "behavioral_signals":   sig,
+        "transformer_updated":  transformer_score is not None,
+        "notes":                transformer_note,
     }
