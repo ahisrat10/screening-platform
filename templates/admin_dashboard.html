@@ -69,6 +69,7 @@
           <option value="admin">Admin</option>
         </select>
         <button id="csv_btn" class="bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium px-4 py-2 rounded-lg">⬇ Export CSV</button>
+        <button id="dataset_btn" class="bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium px-4 py-2 rounded-lg">⬇ Download Dataset (JSON)</button>
       </div>
     </div>
 
@@ -327,6 +328,21 @@ document.getElementById('csv_btn').addEventListener('click', async () => {
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
     a.download = `users-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  } catch (err) { banner(err.message, 'err'); }
+  btn.disabled = false;
+});
+
+// ── JSON dataset export (authenticated download via blob) ──────
+document.getElementById('dataset_btn').addEventListener('click', async () => {
+  const btn = document.getElementById('dataset_btn'); btn.disabled = true;
+  try {
+    const res = await request('/admin/export/all-sessions');
+    const blob = await res.blob();
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `all_sessions-${new Date().toISOString().slice(0, 10)}.json`;
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(a.href), 2000);
   } catch (err) { banner(err.message, 'err'); }
