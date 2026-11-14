@@ -961,6 +961,10 @@ def analyze_ai_detection(
         behavioral_signals = behavioral_dict,
         transformer_score  = transformer_score,
     )
+    if result.get("insufficient"):
+        # Not enough meaningful code to analyze — skip behavioral/submission
+        # logging (there's nothing meaningful to log) and return as-is.
+        return result
     code_features = result.get("code_features") or {}
     # Signals mapped onto the DB/profile column names (see ml/behavioral.py).
     normalized    = result.get("behavioral_signals") or behavioral_dict

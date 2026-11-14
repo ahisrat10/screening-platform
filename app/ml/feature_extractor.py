@@ -41,6 +41,72 @@ _FUNC_DEF_PATTERNS = (
     re.compile(r"\bfunc\s+\w+\s*\("),                      # go
 )
 
+MIN_MEANINGFUL_LINES = 10
+BOILERPLATE_CHAR_RATIO = 0.6
+_BOILERPLATE_CHARS = set("{}();,")
+
+_CPP_PREPROCESSOR_RE = re.compile(r"^\s*#\s*(include|define|pragma|ifdef|endif|ifndef)\b")
+_JAVA_BOILERPLATE_RE = re.compile(r"^\s*(public\s+class\b|public\s+static\s+void\s+main\b|import\s+java\.)")
+_PY_MAIN_GUARD_RE = re.compile(r'^\s*if\s+__name__\s*==\s*[\'"]__main__[\'"]\s*:')
+
+
+class InsufficientCodeError(Exception):
+    """Not enough meaningful (non-blank, non-comment, non-boilerplate) code
+    to run AI detection reliably on."""
+    def __init__(self, message="Code too short or boilerplate-only for reliable analysis. Need 10+ meaningful lines."):
+        super().__init__(message)
+        self.message = message
+
+
+def _strip_cpp_preprocessor(code: str) -> str:
+    return "\n".join(
+        line for line in code.split("\n") if not _CPP_PREPROCESSOR_RE.match(line)
+    )
+
+
+def _strip_python_main_block(lines):
+    """Drop the `if __name__ == "__main__":` line and its indented body —
+    boilerplate that shouldn't count toward "meaningful" code."""
+    out = []
+    skip_indent = None
+    for line in lines:
+        if skip_indent is not None:
+            if line.strip() == "":
+                continue
+            indent = len(line) - len(line.lstrip(" \t"))
+            if indent > skip_indent:
+                continue
+            skip_indent = None
+        if _PY_MAIN_GUARD_RE.match(line):
+            skip_indent = len(line) - len(line.lstrip(" \t"))
+            continue
+        out.append(line)
+    return out
+
+
+def _meaningful_lines(code_for_analysis: str, language: str) -> list:
+    """Non-empty, non-comment, non-boilerplate lines — used only to gate
+    whether there's enough code to analyze reliably. Doesn't change the
+    trained feature vector itself."""
+    lang = language.lower()
+    lines = code_for_analysis.split("\n")
+
+    if lang == "python":
+        lines = _strip_python_main_block(lines)
+    elif lang == "java":
+        lines = [l for l in lines if not _JAVA_BOILERPLATE_RE.match(l)]
+
+    prefixes = _COMMENT_PREFIXES.get(lang, ("//", "#"))
+    return [l for l in lines if l.strip() != "" and not l.strip().startswith(prefixes)]
+
+
+def _is_boilerplate_only(code_for_analysis: str) -> bool:
+    non_ws = [c for c in code_for_analysis if not c.isspace()]
+    if not non_ws:
+        return True
+    n_bracket = sum(1 for c in non_ws if c in _BOILERPLATE_CHARS)
+    return (n_bracket / len(non_ws)) > BOILERPLATE_CHAR_RATIO
+
 
 def _line_stats(lines):
     lengths = [len(l) for l in lines]
@@ -183,23 +249,42 @@ def _ast_features_fallback(code, struct_features):
 
 
 def extract_features(code: str, language: str) -> dict:
-    """Returns the 23 features as a dict keyed by FEATURE_COLUMNS."""
-    lines = code.split("\n")
+    """Returns the 23 features as a dict keyed by FEATURE_COLUMNS.
+
+    Raises InsufficientCodeError if there isn't enough meaningful code
+    (fewer than MIN_MEANINGFUL_LINES non-blank/non-comment/non-boilerplate
+    lines, or the code is mostly brackets/semicolons) to analyze reliably.
+    `code` is kept as-is for display elsewhere; only `code_for_analysis`
+    (preprocessor-stripped, C/C++ only) feeds the feature vector.
+    """
+    lang = language.lower()
+    code_for_analysis = code
+    if lang in ("c", "cpp", "c++"):
+        code_for_analysis = _strip_cpp_preprocessor(code)
+
+    if len(_meaningful_lines(code_for_analysis, lang)) < MIN_MEANINGFUL_LINES:
+        raise InsufficientCodeError()
+    if _is_boilerplate_only(code_for_analysis):
+        raise InsufficientCodeError(
+            "Code is boilerplate-only (brackets/semicolons dominate) for reliable analysis."
+        )
+
+    lines = code_for_analysis.split("\n")
     total_lines = len(lines)
-    total_chars = len(code)
+    total_chars = len(code_for_analysis)
 
     avg_line_len, std_line_len = _line_stats(lines)
     indent_std = _indent_stats(lines)
     comment_ratio = _comment_ratio(lines, language)
     blank_ratio = _blank_ratio(lines)
-    unique_token_ratio, avg_identifier_len, n_operators = _token_features(code)
+    unique_token_ratio, avg_identifier_len, n_operators = _token_features(code_for_analysis)
 
-    struct_features = _struct_features(code, language)
+    struct_features = _struct_features(code_for_analysis, language)
 
-    if language.lower() == "python":
-        ast_features = _ast_features_python(code)
+    if lang == "python":
+        ast_features = _ast_features_python(code_for_analysis)
     else:
-        ast_features = _ast_features_fallback(code, struct_features)
+        ast_features = _ast_features_fallback(code_for_analysis, struct_features)
 
     features = {
         "comment_ratio": comment_ratio,

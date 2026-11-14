@@ -403,8 +403,9 @@ class AIDetectionResponse(BaseModel):
     prediction:     str
     confidence:     float
     ai_probability: float
-    model_scores:   ModelScores
+    model_scores:   Optional[ModelScores] = None
     notes:          Optional[str] = None
+    insufficient:   Optional[bool] = None
 
 
 # ══════════════════════════════════════════════════════════════

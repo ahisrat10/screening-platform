@@ -17,7 +17,7 @@ import zipfile
 import torch
 
 from .fusion_ann import FusionANN
-from .feature_extractor import FEATURE_COLUMNS, extract_features
+from .feature_extractor import FEATURE_COLUMNS, extract_features, InsufficientCodeError
 from .behavioral import behavioral_risk_score, has_behavioral_data, normalize_behavioral_signals
 
 logger = logging.getLogger(__name__)
@@ -153,7 +153,16 @@ def predict_ai_detection(
     transformer_score (0-1 float): pre-computed transformer probability stored
     in DB by the periodic background job.  If None, placeholder 0.5 is used.
     """
-    code_features  = extract_features(code, language)
+    try:
+        code_features = extract_features(code, language)
+    except InsufficientCodeError as e:
+        return {
+            "prediction":     "Insufficient",
+            "confidence":     0,
+            "ai_probability": 0,
+            "notes":          e.message,
+            "insufficient":   True,
+        }
     feature_vector = [code_features[col] for col in FEATURE_COLUMNS]
 
     lr_prob, rf_prob, xgb_prob = _classical_scores(feature_vector)
@@ -190,7 +199,10 @@ def predict_ai_detection(
     if behavioral_used:
         ai_probability = ai_probability * (1 - BEHAVIORAL_BLEND) + behavioral_risk * BEHAVIORAL_BLEND
 
-    prediction = "AI" if ai_probability >= 0.5 else "Human"
+    if 0.42 <= ai_probability <= 0.58:
+        prediction = "Uncertain"
+    else:
+        prediction = "AI" if ai_probability >= 0.5 else "Human"
 
     transformer_note = (
         f"Transformer score from last periodic analysis: {transformer_score:.3f}"
@@ -202,9 +214,16 @@ def predict_ai_detection(
     else:
         transformer_note += " No behavioral telemetry received."
 
+    if prediction == "AI":
+        confidence = ai_probability
+    elif prediction == "Human":
+        confidence = 1 - ai_probability
+    else:  # Uncertain — confidence reflects distance from the 50/50 midpoint
+        confidence = 1 - abs(ai_probability - 0.5) * 2
+
     return {
         "prediction":           prediction,
-        "confidence":           round(ai_probability if prediction == "AI" else 1 - ai_probability, 4),
+        "confidence":           round(confidence, 4),
         "ai_probability":       round(ai_probability, 4),
         "model_scores": {
             "logistic_regression": round(lr_prob, 4),
