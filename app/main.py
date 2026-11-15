@@ -1603,7 +1603,7 @@ def bulk_insert_students(current_user=Depends(auth.get_admin_user), db: Session 
         if existing:
             skipped += 1
         else:
-            user = models.User(student_id=sid, full_name=name, email=email, hashed_password=dummy_hash, role="student")
+            user = models.User(student_id=sid, full_name=name, email=email, password_hash=dummy_hash, role="student")
             db.add(user)
             inserted += 1
     db.commit()
