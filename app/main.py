@@ -1557,3 +1557,54 @@ def home():
         "status":  "running",
         "docs":    "/docs"
     }
+
+
+@app.post("/admin/bulk-insert-students")
+def bulk_insert_students(current_user=Depends(auth.get_admin_user), db: Session = Depends(get_db)):
+    from passlib.context import CryptContext
+    pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+    dummy_hash = pwd_context.hash("user@1234")
+    students = [
+        ("2024-1-60-108", "Sadfan Ahammad Aulin", "2024-1-60-108@std.ewubd.edu"),
+        ("2024-3-60-008", "Md. Abdullah Faiaz", "2024-3-60-008@std.ewubd.edu"),
+        ("2024-3-60-156", "Md. Siam Ahamed", "2024-3-60-156@std.ewubd.edu"),
+        ("2024-3-60-283", "Mir Mahdi Hasan Nabil", "2024-3-60-283@std.ewubd.edu"),
+        ("2024-3-60-286", "Pushpita Mondal Riti", "2024-3-60-286@std.ewubd.edu"),
+        ("2024-3-60-371", "A. K. M Mehedi Hasan Rifat", "2024-3-60-371@std.ewubd.edu"),
+        ("2024-3-60-378", "Mohammad Adil Hossain", "2024-3-60-378@std.ewubd.edu"),
+        ("2024-3-60-534", "Oishe Mahmud Safa", "2024-3-60-534@std.ewubd.edu"),
+        ("2024-3-60-794", "Samiha Umme Hafsa", "2024-3-60-794@std.ewubd.edu"),
+        ("2025-1-60-001", "Shafkat Rahman", "2025-1-60-001@std.ewubd.edu"),
+        ("2025-1-60-015", "Abdur Rahman Moayed", "2025-1-60-015@std.ewubd.edu"),
+        ("2025-1-60-050", "Taskin Billah Tamim", "2025-1-60-050@std.ewubd.edu"),
+        ("2025-1-60-055", "Sadman Showmik Anik", "2025-1-60-055@std.ewubd.edu"),
+        ("2025-1-60-056", "Md Atiqur Rahman", "2025-1-60-056@std.ewubd.edu"),
+        ("2025-1-60-102", "Sadika Ibnat Raisha", "2025-1-60-102@std.ewubd.edu"),
+        ("2025-1-60-109", "Afrin Islam", "2025-1-60-109@std.ewubd.edu"),
+        ("2025-1-60-112", "Rafiqul Islam Kabbo", "2025-1-60-112@std.ewubd.edu"),
+        ("2025-1-60-149", "Mahamudol Hasan Rahat", "2025-1-60-149@std.ewubd.edu"),
+        ("2025-1-60-152", "Mst. Jannatun Ferdos", "2025-1-60-152@std.ewubd.edu"),
+        ("2025-1-60-163", "Sumaya Binte Tayab", "2025-1-60-163@std.ewubd.edu"),
+        ("2025-1-60-174", "Md. Sajid Hasan", "2025-1-60-174@std.ewubd.edu"),
+        ("2025-1-60-182", "Md. Rakib Hossain", "2025-1-60-182@std.ewubd.edu"),
+        ("2025-1-60-240", "Mst. Laysa Islam", "2025-1-60-240@std.ewubd.edu"),
+        ("2025-1-60-253", "Md. Mousfiqur Rahman Bhuiyan", "2025-1-60-253@std.ewubd.edu"),
+        ("2025-1-60-255", "Fardin Hossain Khan", "2025-1-60-255@std.ewubd.edu"),
+        ("2025-1-60-257", "Farhan Ehsas", "2025-1-60-257@std.ewubd.edu"),
+        ("2025-1-60-266", "Nowshin Safique Ahona", "2025-1-60-266@std.ewubd.edu"),
+        ("2025-1-60-271", "Fariha Islam Shaown", "2025-1-60-271@std.ewubd.edu"),
+        ("2025-1-60-319", "Shanjida Akter", "2025-1-60-319@std.ewubd.edu"),
+        ("2025-2-60-510", "Mahia Akter Haq", "2025-2-60-510@std.ewubd.edu"),
+    ]
+    inserted = 0
+    skipped = 0
+    for sid, name, email in students:
+        existing = db.query(models.User).filter(models.User.student_id == sid).first()
+        if existing:
+            skipped += 1
+        else:
+            user = models.User(student_id=sid, full_name=name, email=email, hashed_password=dummy_hash, role="student")
+            db.add(user)
+            inserted += 1
+    db.commit()
+    return {"inserted": inserted, "skipped": skipped}
