@@ -186,12 +186,16 @@ def predict_ai_detection(
         code_features, behavioral,
     )
 
+    # XGBoost/RandomForest run hot on ordinary human code (observed ~0.7-0.8
+    # on plain, non-AI code), pushing the blended score toward 100% too
+    # easily. Temporary rebalance: lean more on LogisticRegression, which is
+    # comparatively conservative, and reduce weight on the two tree ensembles.
     ai_probability = (
-        lr_prob  * 0.10
-        + rf_prob  * 0.25
-        + xgb_prob * 0.30
-        + codebert_prob  * 0.175
-        + unixcoder_prob * 0.175
+        lr_prob  * 0.40
+        + rf_prob  * 0.15
+        + xgb_prob * 0.15
+        + codebert_prob  * 0.15
+        + unixcoder_prob * 0.15
     )
 
     behavioral_risk, behavioral_breakdown = behavioral_risk_score(sig)
