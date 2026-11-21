@@ -1030,6 +1030,7 @@ def _classical_and_transformer_scores(db: Session, student_id: str, filename: Op
 
     scores = (sub.model_scores or {}) if sub else {}
     classical = {
+        "submission_id": sub.id if sub else None,
         "score":      round(sub.ai_probability * 100, 1) if sub and sub.ai_probability is not None else None,
         "prediction": sub.ai_prediction if sub else None,
         "lr_prob":    scores.get("logistic_regression"),
@@ -1167,6 +1168,42 @@ def submit_teacher_feedback(
         "message":       "Feedback recorded",
         "submission_id": submission.id,
         "teacher_label": data.teacher_label,
+    }
+
+
+@app.get("/teacher/feedback-summary")
+def teacher_feedback_summary(
+    current_user=Depends(auth.get_teacher_user),
+    db: Session = Depends(get_db),
+):
+    """Human-evaluation summary (Issue 3): how often the teacher's own
+    Human/AI label agrees with what the model predicted for that submission
+    at the time. Counts each submission once (its most recent label), so
+    re-labeling the same submission doesn't double-count."""
+    latest_per_submission = (
+        db.query(
+            models.TeacherFeedback.submission_id,
+            func.max(models.TeacherFeedback.id).label("latest_id"),
+        )
+        .group_by(models.TeacherFeedback.submission_id)
+        .subquery()
+    )
+    rows = (
+        db.query(models.TeacherFeedback)
+        .join(latest_per_submission, models.TeacherFeedback.id == latest_per_submission.c.latest_id)
+        .all()
+    )
+
+    total = len(rows)
+    agree = sum(1 for r in rows if r.model_prediction and r.model_prediction == r.teacher_label)
+    disagree = total - agree
+
+    return {
+        "total_labeled":  total,
+        "agree_count":    agree,
+        "disagree_count": disagree,
+        "agree_pct":      round(agree / total * 100, 1) if total else 0.0,
+        "disagree_pct":   round(disagree / total * 100, 1) if total else 0.0,
     }
 
 # ══════════════════════════════════════════════════════════════

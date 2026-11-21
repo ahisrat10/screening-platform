@@ -92,6 +92,12 @@
     </div>
   </div>
 
+  <!-- Human evaluation summary (Issue 3) -->
+  <div class="bg-gray-900 rounded-xl p-3 border border-gray-800 mb-6 text-sm">
+    <span class="text-gray-400 text-xs uppercase font-medium mr-2">Human Evaluation:</span>
+    <span id="feedback_summary" class="text-gray-300">—</span>
+  </div>
+
   <!-- SECTION 2 — Exam control -->
   <div class="bg-gray-900 rounded-xl border border-gray-800 mb-6">
     <div class="p-4 border-b border-gray-800 flex justify-between items-center flex-wrap gap-3">
@@ -238,6 +244,13 @@
           <div class="h-[14px]"></div>
           <p id="score_transformer_updated" class="text-[11px] text-gray-600">—</p>
         </div>
+      </div>
+      <!-- Human evaluation feedback (Issue 3) -->
+      <div id="human_feedback_row" class="hidden mt-2 flex items-center gap-2">
+        <span class="text-[11px] text-gray-500">Your verdict on this submission:</span>
+        <button onclick="submitHumanFeedback('Human')" class="px-2.5 py-1 rounded text-xs font-medium bg-green-900/60 hover:bg-green-800 text-green-300 border border-green-800">✓ Human</button>
+        <button onclick="submitHumanFeedback('AI')" class="px-2.5 py-1 rounded text-xs font-medium bg-red-900/60 hover:bg-red-800 text-red-300 border border-red-800">✗ AI</button>
+        <span id="human_feedback_status" class="text-[11px] text-gray-500"></span>
       </div>
     </section>
 
@@ -1061,6 +1074,41 @@ async function loadAiScores(studentId) {
   trBar.className = 'h-full ' + (trPct != null ? aiScoreBarColor(trPct) : 'bg-gray-700');
   document.getElementById('score_transformer_updated').textContent =
     tr.updated_at ? `Updated ${ago(tr.updated_at)}` : 'Pending (≤10 min)';
+
+  currentFeedbackSubmissionId = cl.submission_id || null;
+  document.getElementById('human_feedback_row').classList.toggle('hidden', !currentFeedbackSubmissionId);
+  document.getElementById('human_feedback_status').textContent = '';
+}
+
+// ── human evaluation feedback (Issue 3) ─────────────────────────
+let currentFeedbackSubmissionId = null;
+
+async function submitHumanFeedback(label) {
+  if (!currentFeedbackSubmissionId) return;
+  const statusEl = document.getElementById('human_feedback_status');
+  statusEl.textContent = 'Saving…';
+  try {
+    await api('/teacher/submission-feedback', {
+      method: 'POST',
+      body: JSON.stringify({ submission_id: currentFeedbackSubmissionId, teacher_label: label }),
+    });
+    statusEl.textContent = `Saved: ${label}`;
+    loadFeedbackSummary();
+  } catch (e) {
+    statusEl.textContent = '';
+    toast(e.message, 'err');
+  }
+}
+
+async function loadFeedbackSummary() {
+  const el = document.getElementById('feedback_summary');
+  if (!el) return;
+  try {
+    const d = await api('/teacher/feedback-summary');
+    el.innerHTML = d.total_labeled
+      ? `${d.total_labeled} labeled · <span class="text-green-400">${d.agree_pct}% agree</span> · <span class="text-red-400">${d.disagree_pct}% disagree</span>`
+      : 'No submissions labeled yet';
+  } catch (e) { /* non-fatal */ }
 }
 
 // ── label form ─────────────────────────────────────────────────
@@ -1257,6 +1305,7 @@ document.addEventListener('keydown', e => {
 });
 
 refreshAll();
+loadFeedbackSummary();
 setInterval(() => { if (!document.hidden) refreshAll(); }, POLL_MS);
 </script>
 </body>
