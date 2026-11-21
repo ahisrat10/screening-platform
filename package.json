@@ -2,7 +2,7 @@
     "name": "code-monitor",
     "displayName": "Code Monitor",
     "description": "Automated Technical Screening Platform — Student Monitor",
-    "version": "1.0.5",
+    "version": "1.0.6",
     "publisher": "screening-platform",
     "engines": {
         "vscode": "^1.85.0"
@@ -11,6 +11,23 @@
     "activationEvents": ["onStartupFinished"],
     "main": "./extension.js",
     "contributes": {
+        "viewsContainers": {
+            "activitybar": [
+                {
+                    "id": "codeMonitor",
+                    "title": "Code Monitor",
+                    "icon": "icon-sidebar.svg"
+                }
+            ]
+        },
+        "views": {
+            "codeMonitor": [
+                {
+                    "id": "codeMonitorFileSessions",
+                    "name": "File Scores"
+                }
+            ]
+        },
         "commands": [
             {
                 "command": "code-monitor.login",

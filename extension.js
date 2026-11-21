@@ -83,7 +83,6 @@ let screenFreezeCount     = 0;                  // Feature: Screen Freeze Detect
 let copyFromSameFileCount = 0;                  // Feature: Copy From Same File
 let renameEventCount      = 0;                  // Feature: Variable Rename Detection
 let skillJumpEvents       = [];                 // Feature: Sudden Skill Jump
-let previousSnapshotScore = null;
 let lineAddTimestamps     = [];                 // Feature: Time Per Line Ratio
 let lastLineCount         = 0;
 let sessionBreaks         = [];                 // Feature: Session Break Pattern
@@ -102,11 +101,88 @@ let selectionDebounceTimer  = null;
 let scrollDebounceTimer     = null;
 let pendingTextChangeEvents = [];               // buffered events awaiting the 500ms batch flush
 let lastEnterTime           = 0;                // Enter-key batching (collapse rapid duplicate Enters)
-let lastSnapshotCode        = '';               // skip sending a snapshot identical to the last one
-let lastSnapshotLines       = null;             // array of lines from the last snapshot sent (for delta encoding)
-let linesChangedSinceSnapshot = 0;              // smart trigger: added+removed lines since the last snapshot
 let eventQueue              = [];               // low-priority behavioral events awaiting the 2-min batch flush
 let batchTimer              = null;
+
+// ══════════════════════════════════════════════════════════════
+// PER-FILE SCORING SESSIONS (Issue 2 — multiple files per student)
+// Each open file gets its own independent scoring session, keyed by
+// filename. Switching files preserves the previous file's score and
+// starts the new file fresh (it simply has no entry yet).
+// ══════════════════════════════════════════════════════════════
+let fileSessions = new Map();   // filename -> { lastSnapshotCode, lastSnapshotLines, linesChangedSinceSnapshot, previousSnapshotScore, snapshotCount, latestScore, language, updatedAt }
+
+function getFileSession(filename) {
+    if (!fileSessions.has(filename)) {
+        fileSessions.set(filename, {
+            lastSnapshotCode:          '',
+            lastSnapshotLines:         null,
+            linesChangedSinceSnapshot: 0,
+            previousSnapshotScore:     null,
+            snapshotCount:             0,
+            latestScore:               null,
+            language:                  null,
+            updatedAt:                 null,
+        });
+    }
+    return fileSessions.get(filename);
+}
+
+// ══════════════════════════════════════════════════════════════
+// SIDEBAR — list of files with their individual AI-suspicion scores
+// ══════════════════════════════════════════════════════════════
+class FileSessionsProvider {
+    constructor() {
+        this._onDidChangeTreeData = new vscode.EventEmitter();
+        this.onDidChangeTreeData  = this._onDidChangeTreeData.event;
+    }
+
+    refresh() {
+        this._onDidChangeTreeData.fire();
+    }
+
+    getTreeItem(element) {
+        return element;
+    }
+
+    getChildren() {
+        if (!isConnected || fileSessions.size === 0) {
+            const item = new vscode.TreeItem(
+                isConnected ? 'No snapshots yet' : 'Not logged in',
+                vscode.TreeItemCollapsibleState.None
+            );
+            item.contextValue = 'empty';
+            return [item];
+        }
+
+        const entries = Array.from(fileSessions.entries())
+            .sort((a, b) => (b[1].updatedAt || 0) - (a[1].updatedAt || 0));
+
+        return entries.map(([filename, session]) => {
+            const shortName = filename.split(/[\\/]/).pop();
+            const score     = session.latestScore;
+            const scoreText = score === null ? '…' : `${score}%`;
+            const item = new vscode.TreeItem(`${shortName}  —  ${scoreText}`, vscode.TreeItemCollapsibleState.None);
+            item.description = session.language || '';
+            item.tooltip = [
+                filename,
+                `AI suspicion: ${scoreText}`,
+                `Snapshots: ${session.snapshotCount}`,
+                session.updatedAt ? `Updated: ${new Date(session.updatedAt).toLocaleTimeString()}` : '',
+            ].filter(Boolean).join('\n');
+            item.iconPath = new vscode.ThemeIcon(
+                score === null ? 'file' : score >= 70 ? 'flame' : score >= 40 ? 'warning' : 'check'
+            );
+            return item;
+        });
+    }
+}
+
+let fileSessionsProvider = null;
+
+function refreshFileSessionsView() {
+    if (fileSessionsProvider) fileSessionsProvider.refresh();
+}
 
 // ══════════════════════════════════════════════════════════════
 // ACTIVATE
@@ -121,6 +197,12 @@ function activate(context) {
     updateStatusBar('disconnected');
     statusBarItem.show();
     context.subscriptions.push(statusBarItem);
+
+    // Sidebar: per-file score list
+    fileSessionsProvider = new FileSessionsProvider();
+    context.subscriptions.push(
+        vscode.window.registerTreeDataProvider('codeMonitorFileSessions', fileSessionsProvider)
+    );
 
     // ══════════════════════════════════════════════════════════
     // COMMAND: LOGIN
@@ -205,6 +287,7 @@ function activate(context) {
                 sessionStart:     new Date().toISOString(),
             };
             resetBehavioralState();
+            refreshFileSessionsView();
 
             updateStatusBar('connected');
 
@@ -254,6 +337,7 @@ function activate(context) {
             studentId   = null;
             jwtToken    = null;
             updateStatusBar('disconnected');
+            refreshFileSessionsView();
 
             vscode.window.showInformationMessage(
                 '👋 Logged out. Session report submitted.'
@@ -331,9 +415,20 @@ function activate(context) {
                 pendingTextChangeEvents = [];
                 keystrokeDebounceTimer = null;
                 events.forEach(processTextChangeEvent);
-                events.forEach(trackSmartSnapshotTrigger);
-                if (linesChangedSinceSnapshot >= 5) {
-                    sendCodeSnapshot();
+
+                // Each touched file's own change counter decides whether
+                // THAT file is due for a snapshot — independent sessions.
+                const touchedFiles = new Set();
+                for (const event of events) {
+                    trackSmartSnapshotTrigger(event);
+                    touchedFiles.add(event.document.fileName);
+                }
+                for (const filename of touchedFiles) {
+                    const session = getFileSession(filename);
+                    if (session.linesChangedSinceSnapshot >= 5) {
+                        const doc = vscode.workspace.textDocuments.find(d => d.fileName === filename);
+                        if (doc) sendCodeSnapshot(doc);
+                    }
                 }
             }, 500);
         }
@@ -341,12 +436,14 @@ function activate(context) {
 
     // ── Smart snapshot trigger: count added+removed lines since the
     // last snapshot (from the raw edit ranges, not a full-document
-    // diff — cheap enough to run on every batch of edits). ─────────
+    // diff — cheap enough to run on every batch of edits). Tracked per
+    // file so switching tabs doesn't reset or share another file's count.
     function trackSmartSnapshotTrigger(event) {
+        const session = getFileSession(event.document.fileName);
         for (const change of event.contentChanges) {
             const removedLines = change.range.end.line - change.range.start.line;
             const addedLines    = (change.text.match(/\n/g) || []).length;
-            linesChangedSinceSnapshot += removedLines + addedLines;
+            session.linesChangedSinceSnapshot += removedLines + addedLines;
         }
     }
 
@@ -790,7 +887,6 @@ function resetBehavioralState() {
     copyFromSameFileCount   = 0;
     renameEventCount        = 0;
     skillJumpEvents         = [];
-    previousSnapshotScore   = null;
     lineAddTimestamps       = [];
     lastLineCount           = 0;
     sessionBreaks           = [];
@@ -800,9 +896,7 @@ function resetBehavioralState() {
     lastCodeFingerprint     = null;
     lastAIDetectionResult   = null;
     lastCodeTokensHash      = null;
-    lastSnapshotCode        = '';
-    lastSnapshotLines       = null;
-    linesChangedSinceSnapshot = 0;
+    fileSessions            = new Map();
     eventQueue              = [];
 }
 
@@ -967,23 +1061,31 @@ function diffLines(oldLines, newLines) {
 // SEND CODE SNAPSHOT — triggered once 5+ lines have changed
 // This counts as a "code submission", so it also triggers AI detection.
 // ══════════════════════════════════════════════════════════════
-function sendCodeSnapshot() {
-    const editor = vscode.window.activeTextEditor;
-    if (!editor) return;
+function sendCodeSnapshot(document) {
+    document = document || (vscode.window.activeTextEditor && vscode.window.activeTextEditor.document);
+    if (!document) return;
 
-    const code = editor.document.getText();
+    const code = document.getText();
     if (!code || code.trim().length === 0) return;
 
-    // Skip sending a snapshot that is identical to the last one.
-    if (code.trim() === lastSnapshotCode.trim()) return;
-    lastSnapshotCode = code;
+    const filename = document.fileName;
+    const session  = getFileSession(filename);
+
+    // Skip sending a snapshot that is identical to this file's last one.
+    if (code.trim() === session.lastSnapshotCode.trim()) return;
+    session.lastSnapshotCode = code;
 
     const analysis = analyzeCodeForAIPatterns(code);
+    session.snapshotCount++;
+    session.latestScore = analysis.ai_score;
+    session.language    = document.languageId;
+    session.updatedAt   = Date.now();
     sessionStats.codeSnapshots++;
+    refreshFileSessionsView();
 
-    // ── Sudden Skill Jump ────────────────────────────────────
-    if (previousSnapshotScore !== null) {
-        const delta = analysis.ai_score - previousSnapshotScore;
+    // ── Sudden Skill Jump (per file — compares this file's own history) ──
+    if (session.previousSnapshotScore !== null) {
+        const delta = analysis.ai_score - session.previousSnapshotScore;
         if (Math.abs(delta) >= CONFIG.SKILL_JUMP_SCORE_DELTA) {
             skillJumpEvents.push({ delta, timestamp: Date.now() });
             if (skillJumpEvents.length > 50) skillJumpEvents.shift();
@@ -993,7 +1095,8 @@ function sendCodeSnapshot() {
                 event_type: 'SUDDEN_SKILL_JUMP',
                 severity:   'MEDIUM',
                 details: {
-                    previous_score: previousSnapshotScore,
+                    filename:       filename,
+                    previous_score: session.previousSnapshotScore,
                     current_score:  analysis.ai_score,
                     delta:          delta,
                     message:        'Sudden change in code sophistication between snapshots',
@@ -1002,39 +1105,39 @@ function sendCodeSnapshot() {
             });
         }
     }
-    previousSnapshotScore = analysis.ai_score;
+    session.previousSnapshotScore = analysis.ai_score;
 
     const lines = code.split('\n');
     let codeField  = code;
     let deltaField = undefined;
-    if (lastSnapshotLines !== null) {
-        const ops = diffLines(lastSnapshotLines, lines);
+    if (session.lastSnapshotLines !== null) {
+        const ops = diffLines(session.lastSnapshotLines, lines);
         if (ops !== null) {
             codeField  = undefined;
             deltaField = { ops };
         }
     }
-    lastSnapshotLines         = lines;
-    linesChangedSinceSnapshot = 0;
+    session.lastSnapshotLines         = lines;
+    session.linesChangedSinceSnapshot = 0;
 
     sendToServer('/student/submit-code', {
         student_id:      studentId,
-        filename:        editor.document.fileName,
-        language:        editor.document.languageId,
+        filename:        filename,
+        language:        document.languageId,
         code:            codeField,
         delta:           deltaField,
         line_count:      lines.length,
         analysis:        analysis,
         code_fingerprint: computeCodeFingerprint(code), // Same Code As Classmate (server-side match)
         code_tokens_hash: computeCodeTokensHash(code),  // Similarity Report (token-set hash)
-        snapshot_number: sessionStats.codeSnapshots,
+        snapshot_number: session.snapshotCount,
         timestamp:       new Date().toISOString(),
     });
 
-    console.log(`📸 Snapshot #${sessionStats.codeSnapshots} sent`);
+    console.log(`📸 Snapshot #${session.snapshotCount} sent for ${filename}`);
 
     // A periodic snapshot counts as a code submission — run AI detection.
-    runAIDetection(editor, 'AUTO_SNAPSHOT');
+    runAIDetection({ document }, 'AUTO_SNAPSHOT');
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -1501,6 +1604,7 @@ function handleHeartbeatResponse(reply) {
     studentId   = null;
     jwtToken    = null;
     updateStatusBar('disconnected');
+    refreshFileSessionsView();
     vscode.window.showWarningMessage('You have been disconnected by the teacher');
 }
 

@@ -8,6 +8,12 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 - Initial release
 
+## [1.0.6]
+
+- Feat: independent per-file scoring sessions — each open file tracks its own snapshot/score history, keyed by filename, instead of one shared global session
+- Feat: new "Code Monitor" activity-bar sidebar listing every tracked file with its latest AI-suspicion score
+- Fix: raised PASTE_CHAR_THRESHOLD from 10 to 50 chars (10 was too sensitive to normal typing)
+
 ## [1.0.3]
 
 - Fix: same-file paste now scores +2 instead of +15 (external paste unchanged)
