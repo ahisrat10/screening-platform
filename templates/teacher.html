@@ -157,6 +157,7 @@
       <table class="w-full text-sm min-w-[760px]">
         <thead>
           <tr class="text-gray-500 text-xs uppercase border-b border-gray-800">
+            <th class="text-center font-medium px-2 py-2 w-6"></th>
             <th class="text-left font-medium px-4 py-2">Student</th>
             <th class="text-left font-medium px-4 py-2">ID</th>
             <th class="text-center font-medium px-4 py-2">Status</th>
@@ -166,7 +167,7 @@
           </tr>
         </thead>
         <tbody id="student_rows" class="divide-y divide-gray-800">
-          <tr><td colspan="6" class="p-8 text-center text-gray-500">Loading students…</td></tr>
+          <tr><td colspan="7" class="p-8 text-center text-gray-500">Loading students…</td></tr>
         </tbody>
       </table>
     </div>
@@ -837,12 +838,16 @@ function renderStudents() {
 
   const body = document.getElementById('student_rows');
   if (!rows.length) {
-    body.innerHTML = `<tr><td colspan="6" class="p-8 text-center text-gray-500">No students match this filter.</td></tr>`;
+    body.innerHTML = `<tr><td colspan="7" class="p-8 text-center text-gray-500">No students match this filter.</td></tr>`;
     return;
   }
   body.innerHTML = rows.map(s => {
     const id = esc(s.student_id), n = s.suspicious_score || 0;
+    const expanded = expandedFileRows.has(s.student_id);
     return `<tr class="hover:bg-gray-800/60 cursor-pointer ${s.student_id === selectedId ? 'bg-gray-800/60' : ''}" onclick="openPanel('${id}')">
+      <td class="px-2 py-3 text-center" onclick="event.stopPropagation(); toggleFileRows('${id}')">
+        <span class="text-gray-500 hover:text-white inline-block w-4">${expanded ? '▼' : '▶'}</span>
+      </td>
       <td class="px-4 py-3 text-white font-medium">${esc(s.full_name || '—')}</td>
       <td class="px-4 py-3 text-gray-400">${id}</td>
       <td class="px-4 py-3 text-center">${s.is_connected
@@ -856,8 +861,60 @@ function renderStudents() {
         <button onclick="warnStudent('${id}')" class="px-2 py-1 rounded text-xs bg-yellow-700 hover:bg-yellow-600 text-white">Warn</button>
         <button onclick="disconnectStudent('${id}')" class="px-2 py-1 rounded text-xs bg-red-700 hover:bg-red-600 text-white">Disconnect</button>
         <button onclick="openReport('${id}')" class="px-2 py-1 rounded text-xs bg-gray-700 hover:bg-gray-600 text-white">Report</button>
+      </td></tr>
+      <tr id="file_rows_${id}" class="${expanded ? '' : 'hidden'}"><td colspan="7" class="px-4 pb-3 pt-0 bg-gray-950/60">
+        <div id="file_rows_body_${id}" class="text-xs text-gray-500 py-2">Loading files…</div>
       </td></tr>`;
   }).join('');
+  for (const id of expandedFileRows) {
+    if (rows.some(s => s.student_id === id)) loadFileRows(id);
+  }
+}
+
+// ── per-file score breakdown (Issue 2: multiple files per student) ─────
+const expandedFileRows = new Set();
+const fileScoresCache  = new Map();
+
+function toggleFileRows(id) {
+  if (expandedFileRows.has(id)) expandedFileRows.delete(id);
+  else { expandedFileRows.add(id); fileScoresCache.delete(id); }
+  renderStudents();
+}
+
+async function loadFileRows(id) {
+  const container = document.getElementById(`file_rows_body_${id}`);
+  if (!container) return;
+  try {
+    const cached = fileScoresCache.get(id);
+    const data = cached || await api(`/teacher/student/${encodeURIComponent(id)}/files`);
+    fileScoresCache.set(id, data);
+    const files = data.files || [];
+    if (!files.length) {
+      container.innerHTML = '<p class="text-gray-600 py-1">No files tracked yet for this student.</p>';
+      return;
+    }
+    container.innerHTML = `<table class="w-full text-xs">
+      <thead><tr class="text-gray-600 text-left">
+        <th class="py-1 pr-4 font-medium">File</th>
+        <th class="py-1 pr-4 font-medium">Classical</th>
+        <th class="py-1 pr-4 font-medium">Transformer</th>
+      </tr></thead>
+      <tbody class="divide-y divide-gray-900">
+        ${files.map(f => {
+          const cl = f.classical, tr = f.transformer;
+          const clText = cl.score != null ? `${cl.score}% (${esc(cl.prediction || '—')})` : '—';
+          const trText = tr.score != null ? `${tr.score}%` : 'Pending';
+          return `<tr>
+            <td class="py-1.5 pr-4 text-gray-300">${esc(f.filename)}</td>
+            <td class="py-1.5 pr-4 ${scoreColor(cl.score || 0)}">${clText}</td>
+            <td class="py-1.5 pr-4 ${scoreColor(tr.score || 0)}">${trText}</td>
+          </tr>`;
+        }).join('')}
+      </tbody>
+    </table>`;
+  } catch (e) {
+    container.innerHTML = `<p class="text-red-400 py-1">${esc(e.message)}</p>`;
+  }
 }
 
 // ── side panel ─────────────────────────────────────────────────

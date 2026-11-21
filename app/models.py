@@ -373,6 +373,7 @@ class Submission(Base):
 
     id             = Column(Integer, primary_key=True, index=True)
     student_id     = Column(String, index=True)
+    filename       = Column(String, nullable=True, index=True)
     language       = Column(String)
     code           = Column(String)
     output         = Column(String, nullable=True)

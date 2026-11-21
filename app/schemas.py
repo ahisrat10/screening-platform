@@ -386,6 +386,7 @@ class AIDetectionRequest(BaseModel):
     student_id:  Optional[str] = None
     code:        str
     language:    str
+    filename:    Optional[str] = None
     # The extension posts this under "signals"; older clients use "behavioral".
     behavioral:  BehavioralSignals = Field(
         default_factory=BehavioralSignals,

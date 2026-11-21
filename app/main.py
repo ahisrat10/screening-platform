@@ -33,6 +33,7 @@ def _run_light_migrations(engine):
         "ALTER TABLE correction_memory ADD COLUMN IF NOT EXISTS teacher_id VARCHAR(50) REFERENCES users(student_id)",
         "ALTER TABLE correction_memory ADD COLUMN IF NOT EXISTS agreed BOOLEAN",
         "ALTER TABLE code_snapshots ADD COLUMN IF NOT EXISTS ai_score_updated_at TIMESTAMP",
+        "ALTER TABLE submissions ADD COLUMN IF NOT EXISTS filename VARCHAR",
     ]
     # AUTOCOMMIT + one connection per statement: a failed ALTER (e.g. on a
     # non-Postgres dev DB) must not abort the transaction for the rest.
@@ -985,6 +986,7 @@ def analyze_ai_detection(
 
     submission = models.Submission(
         student_id         = student_id,
+        filename           = data.filename,
         language           = data.language,
         code               = data.code,
         exam_session_id    = active_exam_session.id if active_exam_session else None,
@@ -1017,31 +1019,15 @@ def analyze_ai_detection(
     return result
 
 
-@app.get("/teacher/student/{student_id}/ai-scores")
-def get_student_ai_scores(
-    student_id: str,
-    current_user=Depends(auth.get_teacher_user),
-    db: Session = Depends(get_db),
-):
-    """Dual AI score for the teacher dashboard:
-    - classical: the latest /analyze/ai-detection run (Submission row) — LR/RF/XGB
-      breakdown + blended probability, computed synchronously on every snapshot.
-    - transformer: the latest CodeSnapshot.ai_score, refreshed every ~10 min by
-      the periodic background job (periodic_analysis.py) via the HF Inference API.
-    There is no separate AIDetectionLog table in this schema — the classical
-    scores already live on Submission.model_scores, so that is used directly.
-    """
-    _teacher_require_visible(db, current_user, student_id)
-
-    sub = (
-        db.query(models.Submission)
-        .filter(
-            models.Submission.student_id == student_id,
-            models.Submission.ai_probability.isnot(None),
-        )
-        .order_by(models.Submission.timestamp.desc(), models.Submission.id.desc())
-        .first()
+def _classical_and_transformer_scores(db: Session, student_id: str, filename: Optional[str] = None):
+    sub_q = db.query(models.Submission).filter(
+        models.Submission.student_id == student_id,
+        models.Submission.ai_probability.isnot(None),
     )
+    if filename is not None:
+        sub_q = sub_q.filter(models.Submission.filename == filename)
+    sub = sub_q.order_by(models.Submission.timestamp.desc(), models.Submission.id.desc()).first()
+
     scores = (sub.model_scores or {}) if sub else {}
     classical = {
         "score":      round(sub.ai_probability * 100, 1) if sub and sub.ai_probability is not None else None,
@@ -1052,20 +1038,73 @@ def get_student_ai_scores(
         "updated_at": sub.timestamp.isoformat() if sub and sub.timestamp else None,
     }
 
-    snap = (
-        db.query(models.CodeSnapshot)
-        .filter(models.CodeSnapshot.student_id == student_id)
-        .order_by(models.CodeSnapshot.timestamp.desc(), models.CodeSnapshot.id.desc())
-        .first()
-    )
-    # Pending (never analyzed by the periodic job yet) vs a genuine score:
-    # ai_score_updated_at is NULL until the job actually scores this row.
+    snap_q = db.query(models.CodeSnapshot).filter(models.CodeSnapshot.student_id == student_id)
+    if filename is not None:
+        snap_q = snap_q.filter(models.CodeSnapshot.filename == filename)
+    snap = snap_q.order_by(models.CodeSnapshot.timestamp.desc(), models.CodeSnapshot.id.desc()).first()
+
     has_transformer_score = bool(snap and snap.ai_score_updated_at)
     transformer = {
         "score":      snap.ai_score if has_transformer_score else None,
         "updated_at": snap.ai_score_updated_at.isoformat() if has_transformer_score else None,
     }
+    return classical, transformer
 
+
+@app.get("/teacher/student/{student_id}/files")
+def get_student_file_scores(
+    student_id: str,
+    current_user=Depends(auth.get_teacher_user),
+    db: Session = Depends(get_db),
+):
+    """Per-file breakdown for the teacher dashboard's expandable student rows
+    (Issue 2: multiple files per student). Lists every filename seen for this
+    student across either CodeSnapshot or Submission rows, each with its own
+    classical + transformer score pair."""
+    _teacher_require_visible(db, current_user, student_id)
+
+    snap_filenames = {
+        row[0] for row in db.query(models.CodeSnapshot.filename)
+        .filter(models.CodeSnapshot.student_id == student_id, models.CodeSnapshot.filename.isnot(None))
+        .distinct()
+    }
+    sub_filenames = {
+        row[0] for row in db.query(models.Submission.filename)
+        .filter(models.Submission.student_id == student_id, models.Submission.filename.isnot(None))
+        .distinct()
+    }
+    filenames = sorted(snap_filenames | sub_filenames)
+
+    files = []
+    for filename in filenames:
+        classical, transformer = _classical_and_transformer_scores(db, student_id, filename)
+        files.append({
+            "filename":    filename,
+            "classical":   classical,
+            "transformer": transformer,
+        })
+    return {"files": files}
+
+
+@app.get("/teacher/student/{student_id}/ai-scores")
+def get_student_ai_scores(
+    student_id: str,
+    filename: Optional[str] = Query(default=None),
+    current_user=Depends(auth.get_teacher_user),
+    db: Session = Depends(get_db),
+):
+    """Dual AI score for the teacher dashboard:
+    - classical: the latest /analyze/ai-detection run (Submission row) — LR/RF/XGB
+      breakdown + blended probability, computed synchronously on every snapshot.
+    - transformer: the latest CodeSnapshot.ai_score, refreshed every ~10 min by
+      the periodic background job (periodic_analysis.py) via the HF Inference API.
+    There is no separate AIDetectionLog table in this schema — the classical
+    scores already live on Submission.model_scores, so that is used directly.
+    Pass ?filename= to scope both to one file (Issue 2); omitted, this keeps
+    its original behavior of the latest score across any file.
+    """
+    _teacher_require_visible(db, current_user, student_id)
+    classical, transformer = _classical_and_transformer_scores(db, student_id, filename)
     return {"classical": classical, "transformer": transformer}
 
 
