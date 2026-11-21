@@ -70,6 +70,8 @@
         </select>
         <button id="csv_btn" class="bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium px-4 py-2 rounded-lg">⬇ Export CSV</button>
         <button id="dataset_btn" class="bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium px-4 py-2 rounded-lg">⬇ Download Dataset (JSON)</button>
+        <input id="bulk_upload_input" type="file" accept=".xlsx,.csv" class="hidden"/>
+        <button id="bulk_upload_btn" class="bg-blue-700 hover:bg-blue-600 text-white text-sm font-medium px-4 py-2 rounded-lg">⬆ Upload Students (.xlsx/.csv)</button>
       </div>
     </div>
 
@@ -345,6 +347,25 @@ document.getElementById('dataset_btn').addEventListener('click', async () => {
     a.download = `all_sessions-${new Date().toISOString().slice(0, 10)}.json`;
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  } catch (err) { banner(err.message, 'err'); }
+  btn.disabled = false;
+});
+
+// ── bulk student registration via .xlsx/.csv upload ─────────────
+document.getElementById('bulk_upload_btn').addEventListener('click', () => {
+  document.getElementById('bulk_upload_input').click();
+});
+document.getElementById('bulk_upload_input').addEventListener('change', async (ev) => {
+  const file = ev.target.files[0];
+  ev.target.value = '';   // allow re-selecting the same file later
+  if (!file) return;
+  const btn = document.getElementById('bulk_upload_btn'); btn.disabled = true;
+  try {
+    const form = new FormData();
+    form.append('file', file);
+    const data = await getJSON('/admin/bulk-insert-students/upload', { method: 'POST', body: form });
+    banner(`Uploaded "${file.name}": ${data.inserted} added, ${data.skipped} skipped (of ${data.total_rows} rows). Default password: user@1234`, 'ok');
+    await Promise.all([loadUsers(), loadStats()]);
   } catch (err) { banner(err.message, 'err'); }
   btn.disabled = false;
 });

@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends, HTTPException, WebSocket, WebSocketDisconnect, Header, Query
+from fastapi import FastAPI, Depends, HTTPException, WebSocket, WebSocketDisconnect, Header, Query, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -1635,11 +1635,88 @@ def home():
     }
 
 
-@app.post("/admin/bulk-insert-students")
-def bulk_insert_students(current_user=Depends(auth.get_admin_user), db: Session = Depends(get_db)):
+BULK_INSERT_DEFAULT_PASSWORD = "user@1234"
+
+
+def _bulk_insert_students(db: Session, students: list) -> dict:
+    """Shared logic for both the hardcoded roster endpoint and the
+    Excel/CSV upload endpoint. `students` is a list of (student_id, full_name, email)."""
     from passlib.context import CryptContext
     pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-    dummy_hash = pwd_context.hash("user@1234")
+    dummy_hash = pwd_context.hash(BULK_INSERT_DEFAULT_PASSWORD)
+
+    inserted = 0
+    skipped = 0
+    for sid, name, email in students:
+        sid, name, email = (sid or "").strip(), (name or "").strip(), (email or "").strip()
+        if not sid or not email:
+            skipped += 1
+            continue
+        existing = db.query(models.User).filter(models.User.student_id == sid).first()
+        if existing:
+            skipped += 1
+        else:
+            user = models.User(student_id=sid, full_name=name, email=email, password_hash=dummy_hash, role="student")
+            db.add(user)
+            inserted += 1
+    db.commit()
+    return {"inserted": inserted, "skipped": skipped}
+
+
+@app.post("/admin/bulk-insert-students/upload")
+async def bulk_insert_students_upload(
+    file: UploadFile = File(...),
+    current_user=Depends(auth.get_admin_user),
+    db: Session = Depends(get_db),
+):
+    """Admin panel Excel/CSV upload: columns student_id, full_name, email.
+    Password defaults to BULK_INSERT_DEFAULT_PASSWORD for every row, same as
+    the hardcoded-roster endpoint below."""
+    filename = (file.filename or "").lower()
+    contents = await file.read()
+
+    rows = []
+    if filename.endswith(".csv"):
+        import csv, io
+        text = contents.decode("utf-8-sig", errors="replace")
+        reader = csv.DictReader(io.StringIO(text))
+        header_map = {(h or "").strip().lower(): h for h in (reader.fieldnames or [])}
+        required = ("student_id", "full_name", "email")
+        if not all(col in header_map for col in required):
+            raise HTTPException(status_code=400, detail=f"CSV must have columns: {', '.join(required)}")
+        for row in reader:
+            rows.append((row[header_map["student_id"]], row[header_map["full_name"]], row[header_map["email"]]))
+    elif filename.endswith(".xlsx"):
+        import openpyxl, io
+        try:
+            wb = openpyxl.load_workbook(io.BytesIO(contents), read_only=True, data_only=True)
+        except Exception:
+            raise HTTPException(status_code=400, detail="Could not read .xlsx file — is it a valid Excel file?")
+        ws = wb.active
+        header_row = next(ws.iter_rows(min_row=1, max_row=1, values_only=True), None)
+        if not header_row:
+            raise HTTPException(status_code=400, detail="Spreadsheet is empty")
+        header_map = {(str(h) if h is not None else "").strip().lower(): i for i, h in enumerate(header_row)}
+        required = ("student_id", "full_name", "email")
+        if not all(col in header_map for col in required):
+            raise HTTPException(status_code=400, detail=f".xlsx must have columns: {', '.join(required)}")
+        for row in ws.iter_rows(min_row=2, values_only=True):
+            if not row or all(c is None for c in row):
+                continue
+            sid   = row[header_map["student_id"]] if header_map["student_id"] < len(row) else None
+            name  = row[header_map["full_name"]]  if header_map["full_name"]  < len(row) else None
+            email = row[header_map["email"]]      if header_map["email"]      < len(row) else None
+            rows.append((str(sid) if sid is not None else "", str(name) if name is not None else "", str(email) if email is not None else ""))
+    else:
+        raise HTTPException(status_code=400, detail="Upload a .xlsx or .csv file")
+
+    result = _bulk_insert_students(db, rows)
+    result["total_rows"] = len(rows)
+    return result
+
+
+@app.post("/admin/bulk-insert-students")
+def bulk_insert_students(current_user=Depends(auth.get_admin_user), db: Session = Depends(get_db)):
     students = [
         ("2024-1-60-108", "Sadfan Ahammad Aulin", "2024-1-60-108@std.ewubd.edu"),
         ("2024-3-60-008", "Md. Abdullah Faiaz", "2024-3-60-008@std.ewubd.edu"),
@@ -1672,15 +1749,4 @@ def bulk_insert_students(current_user=Depends(auth.get_admin_user), db: Session 
         ("2025-1-60-319", "Shanjida Akter", "2025-1-60-319@std.ewubd.edu"),
         ("2025-2-60-510", "Mahia Akter Haq", "2025-2-60-510@std.ewubd.edu"),
     ]
-    inserted = 0
-    skipped = 0
-    for sid, name, email in students:
-        existing = db.query(models.User).filter(models.User.student_id == sid).first()
-        if existing:
-            skipped += 1
-        else:
-            user = models.User(student_id=sid, full_name=name, email=email, password_hash=dummy_hash, role="student")
-            db.add(user)
-            inserted += 1
-    db.commit()
-    return {"inserted": inserted, "skipped": skipped}
+    return _bulk_insert_students(db, students)
