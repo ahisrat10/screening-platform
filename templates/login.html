@@ -135,7 +135,7 @@ async function login() {
         if (data.role === 'admin')        window.location.href = '/admin';
         else if (data.role === 'teacher') window.location.href = '/teacher';
         else                              window.location.href = '/student-dashboard';
-      }, 600);
+      }, 2000);
       return;
     }
     showMessage('❌ ' + errorMessage(data, 'Login failed'), 'error');

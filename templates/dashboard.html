@@ -309,8 +309,13 @@ function showTeacherLabel(label) {
 }
 
 function logout() {
-  localStorage.clear();
-  window.location.href = '/';
+  const el = document.getElementById('teacher_label_banner');
+  el.textContent = '👋 Logged out';
+  el.classList.remove('hidden');
+  setTimeout(() => {
+    localStorage.clear();
+    window.location.href = '/';
+  }, 2000);
 }
 
 checkStatus();

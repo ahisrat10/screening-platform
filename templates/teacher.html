@@ -534,7 +534,10 @@ function dialog({ title, message = '', input = null, okText = 'OK', danger = fal
   });
 }
 
-function logout() { localStorage.clear(); window.location.href = '/'; }
+function logout() {
+  toast('👋 Logged out', 'ok');
+  setTimeout(() => { localStorage.clear(); window.location.href = '/'; }, 2000);
+}
 
 // ── CLASSES (Semester -> Course -> Section) ───────────────────
 const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';   // no 0/O/1/I

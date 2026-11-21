@@ -235,7 +235,10 @@ function ago(s) {
   if (sec < 86400 * 30) return Math.floor(sec / 86400) + ' d ago';
   return d.toLocaleDateString();
 }
-function logout() { localStorage.clear(); window.location.href = '/'; }
+function logout() {
+  banner('👋 Logged out', 'ok');
+  setTimeout(() => { localStorage.clear(); window.location.href = '/'; }, 2000);
+}
 
 // ── stats ──────────────────────────────────────────────────────
 async function loadStats() {

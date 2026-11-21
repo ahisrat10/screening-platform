@@ -598,8 +598,14 @@ async function loadCode(studentId) {
 // ── LOGOUT ─────────────────────────────────────────────────────
 function logout() {
   if (ws) ws.close();
-  localStorage.clear();
-  window.location.href = '/';
+  const el = document.createElement('div');
+  el.textContent = '👋 Logged out';
+  el.style.cssText = 'position:fixed;bottom:20px;right:20px;z-index:9999;background:#064e3b;color:#a7f3d0;padding:10px 16px;border-radius:8px;font-size:14px;font-weight:600;box-shadow:0 4px 12px rgba(0,0,0,.4);';
+  document.body.appendChild(el);
+  setTimeout(() => {
+    localStorage.clear();
+    window.location.href = '/';
+  }, 2000);
 }
 
 // ── INIT ───────────────────────────────────────────────────────

@@ -138,7 +138,10 @@ function banner(msg, kind) {
   clearTimeout(banner._t);
   banner._t = setTimeout(() => el.className = 'hidden', 6000);
 }
-function logout() { localStorage.clear(); window.location.href = '/'; }
+function logout() {
+  banner('👋 Logged out', 'ok');
+  setTimeout(() => { localStorage.clear(); window.location.href = '/'; }, 2000);
+}
 
 const PALETTE = ['#2563eb', '#7c3aed', '#0d9488', '#d97706', '#db2777', '#4f46e5', '#059669', '#dc2626'];
 function colorFor(s) { let h = 0; for (const c of String(s)) h = (h * 31 + c.charCodeAt(0)) >>> 0; return PALETTE[h % PALETTE.length]; }

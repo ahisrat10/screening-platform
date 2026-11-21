@@ -244,7 +244,7 @@ document.getElementById('form3').addEventListener('submit', async (e) => {
     const r = await call('/auth/reset-password', { email, otp_code: otp, new_password: pw, confirm_password: cf });
     if (r.ok) {
       showMessage('✅ Password reset! Redirecting to sign in…', 'success');
-      setTimeout(() => window.location.href = '/', 1800);
+      setTimeout(() => window.location.href = '/', 2000);
       return;
     }
     if (r.status === 400) {            // code expired or was used up: start over
