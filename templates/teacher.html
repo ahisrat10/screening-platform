@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Teacher Dashboard — Screening Platform</title>
 <script src="https://cdn.tailwindcss.com"></script>
+<link rel="icon" href="/assets/ewu-logo.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/assets/ewu.css">
 <style>
   .scrollbar-thin::-webkit-scrollbar { width: 6px; height: 6px; }
   .scrollbar-thin::-webkit-scrollbar-track { background: #1f2937; }
@@ -25,7 +27,7 @@
 <div class="bg-gray-900 border-b border-gray-800 px-6 py-3 sticky top-0 z-30">
   <div class="flex justify-between items-center flex-wrap gap-3">
     <div class="flex items-center gap-3">
-      <span class="text-2xl">🎓</span>
+      <a href="/"><img src="/assets/ewu-logo.svg" alt="EWU" class="ewu-logo"></a>
       <div>
         <h1 class="text-white font-bold text-lg leading-tight">Teacher Dashboard</h1>
         <p class="text-gray-500 text-xs">Automated Technical Screening Platform</p>
@@ -92,14 +94,53 @@
     </div>
   </div>
 
+  <!-- SECTION 1 — Live monitor -->
+  <div class="bg-gray-900 rounded-xl border border-gray-800 mb-6">
+    <div class="p-4 border-b border-gray-800 flex justify-between items-center flex-wrap gap-3">
+      <h2 class="text-white font-semibold">👥 Live Monitor</h2>
+      <div class="flex items-center gap-3 flex-wrap">
+        <div class="flex gap-1 bg-gray-950 rounded-lg p-1 border border-gray-800">
+          <button id="f_all"        onclick="setFilter('all')"        class="px-3 py-1 rounded-md text-xs font-medium">All</button>
+          <button id="f_online"     onclick="setFilter('online')"     class="px-3 py-1 rounded-md text-xs font-medium">🟢 Online</button>
+          <button id="f_suspicious" onclick="setFilter('suspicious')" class="px-3 py-1 rounded-md text-xs font-medium">⚠️ Suspicious</button>
+        </div>
+        <select id="class_filter" onchange="onClassFilter()" aria-label="Filter by class"
+          class="bg-gray-800 text-white text-sm px-3 py-1.5 rounded-lg border border-gray-700 focus:outline-none focus:border-blue-500 max-w-[14rem]">
+          <option value="">All students</option>
+        </select>
+        <input id="search" oninput="renderStudents()" placeholder="Search name or ID…"
+          class="bg-gray-800 text-white text-sm px-3 py-1.5 rounded-lg border border-gray-700 focus:outline-none focus:border-blue-500 w-48"/>
+      </div>
+    </div>
+
+    <div class="overflow-x-auto scrollbar-thin">
+      <table class="w-full text-sm min-w-[760px]">
+        <thead>
+          <tr class="text-gray-500 text-xs uppercase border-b border-gray-800">
+            <th class="text-center font-medium px-2 py-2 w-6"></th>
+            <th class="text-left font-medium px-4 py-2">Student</th>
+            <th class="text-left font-medium px-4 py-2">ID</th>
+            <th class="text-center font-medium px-4 py-2">Status</th>
+            <th class="text-center font-medium px-4 py-2">Suspicion</th>
+            <th class="text-left font-medium px-4 py-2">Last Heartbeat</th>
+            <th class="text-right font-medium px-4 py-2">Quick Actions</th>
+          </tr>
+        </thead>
+        <tbody id="student_rows" class="divide-y divide-gray-800">
+          <tr><td colspan="7" class="p-8 text-center text-gray-500">Loading students…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
   <!-- Human evaluation summary (Issue 3) -->
   <div class="bg-gray-900 rounded-xl p-3 border border-gray-800 mb-6 text-sm">
     <span class="text-gray-400 text-xs uppercase font-medium mr-2">Human Evaluation:</span>
     <span id="feedback_summary" class="text-gray-300">—</span>
   </div>
 
-  <!-- SECTION 2 — Exam control -->
-  <div class="bg-gray-900 rounded-xl border border-gray-800 mb-6">
+  <!-- SECTION 2 — Exam control (not used: hidden) -->
+  <div class="hidden bg-gray-900 rounded-xl border border-gray-800 mb-6">
     <div class="p-4 border-b border-gray-800 flex justify-between items-center flex-wrap gap-3">
       <div class="flex items-center gap-3">
         <h2 class="text-white font-semibold">📝 Exam Control</h2>
@@ -140,44 +181,6 @@
     </div>
   </div>
 
-  <!-- SECTION 1 — Live monitor -->
-  <div class="bg-gray-900 rounded-xl border border-gray-800">
-    <div class="p-4 border-b border-gray-800 flex justify-between items-center flex-wrap gap-3">
-      <h2 class="text-white font-semibold">👥 Live Monitor</h2>
-      <div class="flex items-center gap-3 flex-wrap">
-        <div class="flex gap-1 bg-gray-950 rounded-lg p-1 border border-gray-800">
-          <button id="f_all"        onclick="setFilter('all')"        class="px-3 py-1 rounded-md text-xs font-medium">All</button>
-          <button id="f_online"     onclick="setFilter('online')"     class="px-3 py-1 rounded-md text-xs font-medium">🟢 Online</button>
-          <button id="f_suspicious" onclick="setFilter('suspicious')" class="px-3 py-1 rounded-md text-xs font-medium">⚠️ Suspicious</button>
-        </div>
-        <select id="class_filter" onchange="onClassFilter()" aria-label="Filter by class"
-          class="bg-gray-800 text-white text-sm px-3 py-1.5 rounded-lg border border-gray-700 focus:outline-none focus:border-blue-500 max-w-[14rem]">
-          <option value="">All students</option>
-        </select>
-        <input id="search" oninput="renderStudents()" placeholder="Search name or ID…"
-          class="bg-gray-800 text-white text-sm px-3 py-1.5 rounded-lg border border-gray-700 focus:outline-none focus:border-blue-500 w-48"/>
-      </div>
-    </div>
-
-    <div class="overflow-x-auto scrollbar-thin">
-      <table class="w-full text-sm min-w-[760px]">
-        <thead>
-          <tr class="text-gray-500 text-xs uppercase border-b border-gray-800">
-            <th class="text-center font-medium px-2 py-2 w-6"></th>
-            <th class="text-left font-medium px-4 py-2">Student</th>
-            <th class="text-left font-medium px-4 py-2">ID</th>
-            <th class="text-center font-medium px-4 py-2">Status</th>
-            <th class="text-center font-medium px-4 py-2">Suspicion</th>
-            <th class="text-left font-medium px-4 py-2">Last Heartbeat</th>
-            <th class="text-right font-medium px-4 py-2">Quick Actions</th>
-          </tr>
-        </thead>
-        <tbody id="student_rows" class="divide-y divide-gray-800">
-          <tr><td colspan="7" class="p-8 text-center text-gray-500">Loading students…</td></tr>
-        </tbody>
-      </table>
-    </div>
-  </div>
 </div>
 
 <!-- Side panel -->
@@ -245,6 +248,7 @@
           <p id="score_transformer_updated" class="text-[11px] text-gray-600">—</p>
         </div>
       </div>
+      <div id="score_files" class="mt-3 hidden"></div>
       <!-- Human evaluation feedback (Issue 3) -->
       <div id="human_feedback_row" class="hidden mt-2 flex items-center gap-2">
         <span class="text-[11px] text-gray-500">Your verdict on this submission:</span>
@@ -268,8 +272,21 @@
       </div>
     </section>
 
-    <!-- Code -->
+    <!-- Code: every file, with its AI % and the average -->
     <section>
+      <div class="flex justify-between items-center mb-2">
+        <h3 class="text-gray-400 text-xs uppercase font-medium">Code &amp; AI percentage</h3>
+        <span id="cf_avg" class="text-sm font-bold text-white"></span>
+      </div>
+      <div id="cf_tabs" class="flex flex-wrap gap-2 mb-2"></div>
+      <div id="cf_meta" class="text-gray-500 text-[11px] mb-1"></div>
+      <div class="bg-gray-950 border border-gray-800 rounded-lg overflow-auto max-h-96 scrollbar-thin">
+        <pre id="cf_view" class="code-view text-green-300 px-3 py-2" tabindex="0">Select a student with code.</pre>
+      </div>
+    </section>
+
+    <!-- Old single-file viewer (kept for the page script, not shown) -->
+    <section class="hidden">
       <div class="flex justify-between items-center mb-2">
         <h3 class="text-gray-400 text-xs uppercase font-medium">Current Code (read-only)</h3>
         <span id="pn_code_meta" class="text-gray-600 text-[11px]"></span>
@@ -288,9 +305,23 @@
       <div id="pn_warnings" class="space-y-1 text-sm text-gray-500">None.</div>
     </section>
 
+    <!-- Written feedback for the student -->
+    <section>
+      <h3 class="text-gray-400 text-xs uppercase font-medium mb-2">Feedback for the student</h3>
+      <div class="bg-gray-950 border border-gray-800 rounded-lg p-3 space-y-3">
+        <select id="fb_file" class="w-full bg-gray-800 text-white text-sm px-3 py-2 rounded-lg border border-gray-700">
+          <option value="">Whole lab (all code)</option>
+        </select>
+        <textarea id="fb_text" rows="3" maxlength="4000" placeholder="Write feedback on this student's code. They will read it on their portal."
+          class="w-full bg-gray-800 text-white text-sm px-3 py-2 rounded-lg border border-gray-700"></textarea>
+        <button id="fb_send" type="button" onclick="sendNote()" class="w-full bg-green-600 text-white py-2 rounded-lg text-sm font-medium">Send feedback</button>
+        <div id="fb_sent" class="space-y-2"></div>
+      </div>
+    </section>
+
     <!-- Label form -->
     <section>
-      <h3 class="text-gray-400 text-xs uppercase font-medium mb-2">Label this session</h3>
+      <h3 class="text-gray-400 text-xs uppercase font-medium mb-2">Verdict: Human / AI / Unsure <span class="normal-case text-gray-600">(optional)</span></h3>
       <form id="label_form" onsubmit="submitLabel(event)" class="bg-gray-950 border border-gray-800 rounded-lg p-3 space-y-3">
         <div id="ai_quick_actions" class="hidden flex gap-2">
           <button type="button" onclick="quickAiFeedback(true)"
@@ -445,16 +476,17 @@
 
 <!-- Toasts -->
 <div id="toasts" class="fixed bottom-5 right-5 z-[80] space-y-2"></div>
+<div id="alerts" class="fixed top-20 right-5 z-[85] space-y-2 w-80"></div>
 
 <script>
-const API  = 'https://screening-platform-tpku.onrender.com';
+const API  = location.origin;
 const token = localStorage.getItem('token');
 const role  = localStorage.getItem('role');
 const POLL_MS = 10000;
 const SUSPICIOUS = 50;
 
 if (!token || (role !== 'teacher' && role !== 'admin')) {
-  window.location.href = '/';
+  window.location.href = '/teacher/login';
 }
 document.getElementById('teacher_name').textContent = localStorage.getItem('full_name') || 'Teacher';
 
@@ -493,7 +525,7 @@ async function api(path, opts = {}) {
     ...opts,
     headers: { 'Authorization': `Bearer ${token}`, ...(opts.body ? {'Content-Type': 'application/json'} : {}) },
   });
-  if (res.status === 401) { localStorage.clear(); window.location.href = '/'; throw new Error('Session expired'); }
+  if (res.status === 401) { localStorage.clear(); window.location.href = '/teacher/login'; throw new Error('Session expired'); }
   let data = null;
   try { data = await res.json(); } catch (e) {}
   if (!res.ok) {
@@ -536,12 +568,12 @@ function dialog({ title, message = '', input = null, okText = 'OK', danger = fal
 
 function logout() {
   toast('👋 Logged out', 'ok');
-  setTimeout(() => { localStorage.clear(); window.location.href = '/'; }, 2000);
+  setTimeout(() => { localStorage.clear(); window.location.href = '/teacher/login'; }, 2000);
 }
 
 // ── CLASSES (Semester -> Course -> Section) ───────────────────
 const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';   // no 0/O/1/I
-const PALETTE = ['#2563eb', '#7c3aed', '#0d9488', '#d97706', '#db2777', '#4f46e5', '#059669', '#dc2626'];
+const PALETTE = ['#CFE3F8', '#C4DCF5', '#D6E8FA', '#BDD8F3'];
 let classes = [];
 let monitorClass = '';          // '' = all students
 let inviteClassId = null;
@@ -646,6 +678,8 @@ function classCard(c) {
       </button>
       <button onclick="copyInviteLink(${c.id})" class="py-1.5 rounded-lg text-xs font-medium bg-gray-700 hover:bg-gray-600 text-white">🔗 Invite link</button>
       <button onclick="openInvite(${c.id})" class="py-1.5 rounded-lg text-xs font-medium bg-gray-700 hover:bg-gray-600 text-white">✉ Invite student</button>
+      <button onclick="uploadRoster(${c.id})" class="py-1.5 rounded-lg text-xs font-medium bg-gray-700 hover:bg-gray-600 text-white">📄 Upload students (Excel)</button>
+      <button onclick="openDatasets(${c.id})" class="py-1.5 rounded-lg text-xs font-medium bg-gray-700 hover:bg-gray-600 text-white">📦 Datasets</button>
       <button onclick="monitorThisClass(${c.id})" class="col-span-2 py-1.5 rounded-lg text-xs font-medium bg-gray-800 hover:bg-gray-700 text-gray-200 border border-gray-700">Monitor this class</button>
     </div>
   </article>`;
@@ -682,6 +716,81 @@ async function endLab(id) {
   if (!ok) return;
   try { await post(`/teacher/classes/${id}/lab/end`); toast('Lab ended', 'ok'); await loadClasses(); }
   catch (e) { toast(e.message, 'err'); }
+}
+
+function uploadRoster(id) {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.xlsx,.csv';
+  input.onchange = async () => {
+    const f = input.files[0];
+    if (!f) return;
+    const fd = new FormData();
+    fd.append('file', f);
+    try {
+      const res = await fetch(`${API}/teacher/classes/${id}/roster/upload`, {
+        method: 'POST', headers: { 'Authorization': `Bearer ${token}` }, body: fd,
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.detail || `Upload failed (${res.status})`);
+      toast(`${data.added_to_class} students added (${data.already_in_class} were already in, ${data.skipped} skipped)`, 'ok');
+      await loadClasses();
+    } catch (e) { toast(e.message, 'err'); }
+  };
+  input.click();
+}
+
+async function downloadDataset(classId, ds, fmt = 'json') {
+  try {
+    const res = await fetch(`${API}/teacher/classes/${classId}/datasets/${ds}/download?format=${fmt}`, { headers: { 'Authorization': `Bearer ${token}` } });
+    if (!res.ok) throw new Error('Download failed');
+    const cd = res.headers.get('Content-Disposition') || '';
+    const name = (cd.match(/filename="([^"]+)"/) || [])[1] || ('dataset.' + fmt);
+    const url = URL.createObjectURL(await res.blob());
+    const a = document.createElement('a');
+    a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+  } catch (e) { toast(e.message, 'err'); }
+}
+async function deleteDataset(classId, ds) {
+  if (!await dialog({ title: 'Delete this dataset?', message: 'This cannot be undone.', okText: 'Delete', danger: true })) return;
+  try { await api(`/teacher/classes/${classId}/datasets/${ds}`, { method: 'DELETE' }); toast('Dataset deleted', 'ok'); openDatasets(classId); }
+  catch (e) { toast(e.message, 'err'); }
+}
+async function makeDataset(classId) {
+  try { const r = await post(`/teacher/classes/${classId}/datasets/generate`); toast(r.message, 'ok'); openDatasets(classId); }
+  catch (e) { toast(e.message, 'err'); }
+}
+async function openDatasets(classId) {
+  let rows;
+  try { rows = await api(`/teacher/classes/${classId}/datasets`); }
+  catch (e) { toast(e.message, 'err'); return; }
+  let box = document.getElementById('datasets_modal');
+  if (!box) {
+    box = document.createElement('div');
+    box.id = 'datasets_modal';
+    box.className = 'fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4';
+    box.onclick = (e) => { if (e.target === box) box.remove(); };
+    document.body.appendChild(box);
+  }
+  box.innerHTML = `<div class="bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-xl p-5">
+    <div class="flex items-center justify-between mb-1">
+      <h3 class="text-white font-semibold">Datasets</h3>
+      <button onclick="document.getElementById('datasets_modal').remove()" class="text-gray-400 hover:text-white">✕</button>
+    </div>
+    <p class="text-gray-500 text-xs mb-3">Saved when you end a lab, named date_course. Kept 30 days, then removed automatically.</p>
+    <div class="space-y-2 max-h-80 overflow-y-auto">${rows.length ? rows.map(r => `
+      <div class="flex items-center gap-2 bg-gray-950 border border-gray-800 rounded-lg px-3 py-2">
+        <div class="flex-1 min-w-0">
+          <p class="text-gray-200 text-sm truncate">${esc(r.filename)}</p>
+          <p class="text-gray-600 text-[11px]">${(r.size_bytes / 1024).toFixed(1)} KB · expires ${new Date(r.expires_at).toLocaleDateString()}</p>
+        </div>
+        <button onclick="downloadDataset(${classId}, ${r.id}, 'xlsx')" class="px-2.5 py-1 rounded text-xs bg-green-600 text-white">Excel</button>
+        <button onclick="downloadDataset(${classId}, ${r.id})" class="px-2.5 py-1 rounded text-xs bg-blue-600 hover:bg-blue-700 text-white">JSON</button>
+        <button onclick="deleteDataset(${classId}, ${r.id})" class="px-2.5 py-1 rounded text-xs bg-red-900/60 hover:bg-red-800 text-red-300">Delete</button>
+      </div>`).join('') : '<p class="text-gray-500 text-sm">No datasets yet. End a lab to create one.</p>'}</div>
+    <button onclick="makeDataset(${classId})" class="mt-3 w-full py-2 rounded-lg text-sm font-medium bg-gray-800 hover:bg-gray-700 text-gray-200 border border-gray-700">Create dataset from the last lab now</button>
+  </div>`;
 }
 
 function monitorThisClass(id) {
@@ -914,6 +1023,7 @@ async function loadFileRows(id) {
         <th class="py-1 pr-4 font-medium">File</th>
         <th class="py-1 pr-4 font-medium">Classical</th>
         <th class="py-1 pr-4 font-medium">Transformer</th>
+        <th class="py-1 pr-4 font-medium">Combined</th>
       </tr></thead>
       <tbody class="divide-y divide-gray-900">
         ${files.map(f => {
@@ -924,8 +1034,13 @@ async function loadFileRows(id) {
             <td class="py-1.5 pr-4 text-gray-300">${esc(f.filename)}</td>
             <td class="py-1.5 pr-4 ${scoreColor(cl.score || 0)}">${clText}</td>
             <td class="py-1.5 pr-4 ${scoreColor(tr.score || 0)}">${trText}</td>
+            <td class="py-1.5 pr-4 font-semibold ${scoreColor(f.combined || 0)}">${f.combined != null ? f.combined + '%' : '—'}</td>
           </tr>`;
         }).join('')}
+        ${(() => { const a = data.average || {}; const p = v => v != null ? v + '%' : '—';
+          return `<tr class="border-t border-gray-700"><td class="py-1.5 pr-4 text-gray-400 font-medium">Average (${a.file_count || files.length} files)</td>
+            <td class="py-1.5 pr-4 text-gray-200">${p(a.classical)}</td><td class="py-1.5 pr-4 text-gray-200">${p(a.transformer)}</td>
+            <td class="py-1.5 pr-4 font-bold text-white">${p(a.combined)}</td></tr>`; })()}
       </tbody>
     </table>`;
   } catch (e) {
@@ -944,6 +1059,10 @@ function openPanel(id) {
     document.getElementById('label_form').reset();
     document.getElementById('lbl_conf').value = '3';
     document.getElementById('ai_quick_actions').classList.add('hidden');
+    cfFiles = []; cfSelected = null; cfSig = '';
+    document.getElementById('cf_view').textContent = 'Loading…';
+    document.getElementById('cf_tabs').innerHTML = ''; document.getElementById('cf_meta').textContent = ''; document.getElementById('cf_avg').textContent = '';
+    document.getElementById('fb_sent').innerHTML = '';
     ['pn_code', 'pn_ln'].forEach(i => document.getElementById(i).textContent = '');
   }
   const s = students.find(x => x.student_id === id);
@@ -1047,6 +1166,82 @@ function aiScoreBarColor(pct) {
   if (pct >= 40) return 'bg-yellow-500';
   return 'bg-green-500';
 }
+// ── code files (with AI %) and written feedback ────────────────
+let cfFiles = [], cfSelected = null, cfSig = '';
+function renderCodeFiles() {
+  const tabs = document.getElementById('cf_tabs'), view = document.getElementById('cf_view'), meta = document.getElementById('cf_meta');
+  const p = v => v != null ? `${v}%` : '—';
+  if (!cfFiles.length) { tabs.innerHTML = ''; view.textContent = 'No code from this student yet.'; meta.textContent = ''; return; }
+  if (!cfFiles.some(f => f.filename === cfSelected)) cfSelected = cfFiles[0].filename;
+  tabs.innerHTML = cfFiles.map(f => `<button type="button" data-f="${esc(f.filename)}"
+    class="cf_tab px-3 py-1.5 rounded-lg text-xs border ${f.filename === cfSelected ? 'bg-blue-600 border-blue-400 text-white' : 'bg-gray-800 border-gray-700 text-gray-300'}">
+    ${esc(f.filename)} <b class="ml-1">${p(f.ai_percent)}</b></button>`).join('');
+  tabs.querySelectorAll('.cf_tab').forEach(b => b.onclick = () => { cfSelected = b.dataset.f; cfSig = ''; renderCodeFiles(); });
+  const f = cfFiles.find(x => x.filename === cfSelected);
+  const when = f.date ? new Date(f.date).toLocaleString() : '—';
+  meta.textContent = `${f.course ? f.course + (f.section ? ' · Sec ' + f.section : '') + ' · ' : ''}${when} · ${f.lines} lines · AI ${p(f.ai_percent)} (classical ${p(f.ai_percent_classical)}, transformer ${p(f.ai_percent_transformer)})`;
+  view.textContent = f.code || '';
+  const sel = document.getElementById('fb_file');
+  const keep = sel.value;
+  sel.innerHTML = '<option value="">Whole lab (all code)</option>' + cfFiles.map(x => `<option value="${esc(x.filename)}">${esc(x.filename)}</option>`).join('');
+  sel.value = cfFiles.some(x => x.filename === keep) ? keep : '';
+}
+async function loadCodeFiles(studentId) {
+  try {
+    const d = await api(`/teacher/student/${encodeURIComponent(studentId)}/codes`);
+    if (studentId !== selectedId) return;
+    const sig = JSON.stringify([d.files.map(f => [f.filename, f.date, f.ai_percent, f.lines]), d.average]);
+    document.getElementById('cf_avg').textContent = d.average && d.average.combined != null
+      ? `Average AI: ${d.average.combined}% · ${d.average.file_count} file(s)` : '';
+    if (sig === cfSig) return;        // nothing changed: keep scroll position
+    cfSig = sig; cfFiles = d.files; renderCodeFiles();
+  } catch (e) { /* non-fatal */ }
+}
+async function loadNotes(studentId) {
+  try {
+    const rows = await api(`/teacher/student/${encodeURIComponent(studentId)}/notes`);
+    if (studentId !== selectedId) return;
+    document.getElementById('fb_sent').innerHTML = rows.map(r => `<div class="bg-gray-900 border border-gray-800 rounded-lg p-2 text-sm">
+      <div class="text-[11px] text-gray-500 mb-0.5">${r.filename ? esc(r.filename) : 'Whole lab'} · ${r.created_at ? new Date(r.created_at).toLocaleString() : ''}</div>
+      <div class="text-gray-200 whitespace-pre-wrap">${esc(r.text)}</div></div>`).join('');
+  } catch (e) { /* non-fatal */ }
+}
+async function sendNote() {
+  const text = document.getElementById('fb_text').value.trim();
+  if (!text) { toast('Write some feedback first', 'err'); return; }
+  const btn = document.getElementById('fb_send'); btn.disabled = true;
+  try {
+    await post(`/teacher/student/${encodeURIComponent(selectedId)}/notes`, { text, filename: document.getElementById('fb_file').value || null });
+    document.getElementById('fb_text').value = '';
+    toast('Feedback sent to the student', 'ok');
+    loadNotes(selectedId);
+  } catch (e) { toast(e.message, 'err'); }
+  btn.disabled = false;
+}
+
+async function loadFileSummary(studentId) {
+  const box = document.getElementById('score_files');
+  if (!box) return;
+  try {
+    const d = await api(`/teacher/student/${encodeURIComponent(studentId)}/files`);
+    if (studentId !== selectedId) return;
+    const files = d.files || [];
+    if (!files.length) { box.classList.add('hidden'); return; }
+    const p = v => v != null ? `${v}%` : '—';
+    const a = d.average || {};
+    box.classList.remove('hidden');
+    box.innerHTML = `<div class="bg-gray-950 border border-gray-800 rounded-lg p-3">
+      <div class="flex items-center justify-between mb-2">
+        <span class="text-xs font-semibold text-gray-300">Average across ${a.file_count || files.length} file(s)</span>
+        <span class="text-sm font-bold text-white">${p(a.combined)}</span>
+      </div>
+      <div class="space-y-1">${files.map(f => `<div class="flex items-center justify-between text-xs">
+        <span class="text-gray-400 truncate pr-2">${esc(f.filename)}</span>
+        <span class="text-gray-200 shrink-0">${p(f.combined)} <span class="text-gray-600">(C ${p(f.classical.score)} · T ${p(f.transformer.score)})</span></span>
+      </div>`).join('')}</div></div>`;
+  } catch (e) { box.classList.add('hidden'); }
+}
+
 async function loadAiScores(studentId) {
   let data;
   try {
@@ -1077,6 +1272,10 @@ async function loadAiScores(studentId) {
   trBar.className = 'h-full ' + (trPct != null ? aiScoreBarColor(trPct) : 'bg-gray-700');
   document.getElementById('score_transformer_updated').textContent =
     tr.updated_at ? `Updated ${ago(tr.updated_at)}` : 'Pending (≤10 min)';
+
+  loadFileSummary(studentId);
+  loadCodeFiles(studentId);
+  loadNotes(studentId);
 
   currentFeedbackSubmissionId = cl.submission_id || null;
   document.getElementById('human_feedback_row').classList.toggle('hidden', !currentFeedbackSubmissionId);
@@ -1202,7 +1401,15 @@ async function openReport(id) {
       : `<p class="text-gray-600">${empty}</p>`;
     const td = v => `<td class="py-1.5 pr-4 text-gray-300">${v}</td>`;
 
+    let cd = { files: [], average: null };
+    try { cd = await api(`/teacher/student/${encodeURIComponent(id)}/codes`); } catch (e) { /* non-fatal */ }
+    const pc = v => v != null ? v + '%' : '—';
+    const avg = cd.average && cd.average.combined != null ? `<span class="text-sm font-bold text-white ml-2">Average AI: ${cd.average.combined}% · ${cd.average.file_count} file(s)</span>` : '';
+
     body.innerHTML = `
+      <section><h3 class="text-white font-semibold mb-2">AI % per code file${avg}</h3>${table(['File', 'Course', 'Date', 'Lines', 'AI %'],
+        cd.files.map(f => `<tr>${td(esc(f.filename))}${td(esc(f.course || '—'))}${td(esc(fmt(f.date)))}${td(f.lines)}${td(`<b>${pc(f.ai_percent)}</b>`)}</tr>`),
+        'No code files yet.')}</section>
       <section><h3 class="text-white font-semibold mb-2">AI detection history</h3>${table(['When', 'Language', 'Prediction', 'AI score'],
         r.submissions.filter(s => s.prediction).map(s => `<tr>${td(esc(fmt(s.timestamp)))}${td(esc(s.language))}${td(`<b class="${String(s.prediction).toUpperCase() === 'AI' ? 'text-red-400' : 'text-green-400'}">${esc(s.prediction)}</b>`)}${td(s.ai_probability != null ? (s.ai_probability * 100).toFixed(1) + '%' : '—')}</tr>`),
         'No detection runs.')}</section>
@@ -1310,6 +1517,33 @@ document.addEventListener('keydown', e => {
 refreshAll();
 loadFeedbackSummary();
 setInterval(() => { if (!document.hidden) refreshAll(); }, POLL_MS);
+
+// ── early-logout alerts: stay on screen until dismissed ────────
+let alertSince = null;
+function showAlert(a) {
+  const el = document.createElement('div');
+  el.className = 'bg-red-950 border border-red-500 text-white text-sm rounded-xl shadow-2xl p-3 flex gap-3 items-start';
+  const course = a.course ? ` (${a.course}${a.section ? ' · Sec ' + a.section : ''})` : '';
+  el.innerHTML = `<span class="text-xl">🚪</span>
+    <div class="flex-1 min-w-0">
+      <p class="font-semibold">${esc(a.name)} <span class="font-mono text-xs text-red-200">${esc(a.student_id)}</span></p>
+      <p class="text-red-100 text-xs mt-0.5">${a.reason === 'closed' ? 'closed VS Code' : 'is logging out'} before the lab ended${esc(course)}</p>
+      <p class="text-red-300/70 text-[11px] mt-1">${a.at ? new Date(a.at).toLocaleTimeString() : ''}</p>
+    </div>
+    <button class="text-red-200 hover:text-white text-lg leading-none" aria-label="Dismiss">×</button>`;
+  el.querySelector('button').onclick = () => el.remove();
+  document.getElementById('alerts').appendChild(el);
+}
+async function pollAlerts() {
+  try {
+    const d = await api('/teacher/alerts' + (alertSince === null ? '' : '?since=' + alertSince));
+    (d.alerts || []).forEach(showAlert);
+    alertSince = Math.max(alertSince || 0, d.last_id || 0);
+  } catch (e) { /* alerts are best-effort */ }
+}
+pollAlerts();
+setInterval(pollAlerts, 5000);
 </script>
+<script src="/assets/ewu.js"></script>
 </body>
 </html>

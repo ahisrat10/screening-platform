@@ -10,5 +10,6 @@ RUN pip install torch --index-url https://download.pytorch.org/whl/cpu \
 
 COPY app ./app
 COPY templates ./templates
+COPY static ./static
 
 CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]

@@ -394,3 +394,38 @@ class Submission(Base):
     behavioral_data_id = Column(Integer, ForeignKey("behavioral_data.id"), nullable=True)
 
     timestamp      = Column(DateTime, server_default=func.now())
+
+
+class AppSetting(Base):
+    """Small key/value store (e.g. the teacher sign-up code set by the admin)."""
+    __tablename__ = "app_settings"
+
+    key   = Column(String(64), primary_key=True)
+    value = Column(String, nullable=True)
+
+
+class ClassDataset(Base):
+    """One exported JSON dataset per finished lab, owned by one class.
+    Kept in the DB (the host disk is ephemeral); auto-removed after 30 days."""
+    __tablename__ = "class_datasets"
+
+    id         = Column(Integer, primary_key=True, index=True)
+    class_id   = Column(Integer, ForeignKey("classrooms.id"), index=True)
+    filename   = Column(String(160))
+    content    = Column(String)
+    size_bytes = Column(Integer, default=0)
+    created_by = Column(String(50), nullable=True)
+    created_at = Column(DateTime, server_default=func.now(), index=True)
+
+
+class StudentNote(Base):
+    """Written feedback from a teacher to a student, optionally about one file.
+    The student reads it on their portal."""
+    __tablename__ = "student_notes"
+
+    id         = Column(Integer, primary_key=True, index=True)
+    student_id = Column(String(50), ForeignKey("users.student_id"), index=True)
+    teacher_id = Column(String(50), ForeignKey("users.student_id"), index=True)
+    filename   = Column(String, nullable=True)       # null = feedback on the whole lab
+    text       = Column(String)
+    created_at = Column(DateTime, server_default=func.now())

@@ -3,615 +3,517 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Admin Dashboard — Screening Platform</title>
+<title>Administration — EWU Screening Platform</title>
 <script src="https://cdn.tailwindcss.com"></script>
-<style>
-  .scrollbar-thin::-webkit-scrollbar { width: 4px; }
-  .scrollbar-thin::-webkit-scrollbar-track { background: #1f2937; }
-  .scrollbar-thin::-webkit-scrollbar-thumb { background: #4b5563; border-radius: 2px; }
-</style>
+<link rel="icon" href="/assets/ewu-logo.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/assets/ewu.css">
 </head>
-<body class="bg-gray-950 min-h-screen">
+<body class="bg-gray-950 min-h-screen text-gray-200">
 
-<!-- Header -->
-<div class="bg-gray-900 border-b border-gray-800 px-6 py-3 sticky top-0 z-40">
-  <div class="flex justify-between items-center">
-    <div class="flex items-center gap-3">
-      <span class="text-2xl">🛡️</span>
-      <div>
-        <h1 class="text-white font-bold text-lg leading-tight">Admin Dashboard</h1>
-        <p class="text-gray-500 text-xs">Automated Technical Screening Platform</p>
-      </div>
-    </div>
+<header class="px-5 py-3 sticky top-0 z-30">
+  <div class="max-w-screen-xl mx-auto flex justify-between items-center gap-3 flex-wrap">
     <div class="flex items-center gap-4">
-      <div id="ws_badge"
-        class="flex items-center gap-2 px-3 py-1 rounded-full text-xs
-               bg-red-900 text-red-300 font-medium">
-        <span class="w-2 h-2 rounded-full bg-red-400 animate-pulse"></span>
-        Connecting...
-      </div>
-      <div class="text-right">
-        <p id="admin_name" class="text-white text-sm font-medium"></p>
-        <p class="text-gray-500 text-xs">Administrator</p>
-      </div>
-      <a href="/admin-dashboard"
-        class="text-gray-300 hover:text-white text-sm px-3 py-2 rounded-lg hover:bg-gray-800 transition">
-        Database panel
-      </a>
-      <button onclick="logout()"
-        class="bg-red-600 hover:bg-red-700 text-white
-               px-4 py-2 rounded-lg text-sm font-medium transition">
-        Logout
-      </button>
-    </div>
-  </div>
-</div>
-
-<div class="max-w-screen-xl mx-auto p-5">
-
-  <!-- Stats Row -->
-  <div class="grid grid-cols-5 gap-4 mb-6">
-    <div class="bg-gray-900 rounded-xl p-4 border border-gray-800">
-      <p class="text-gray-400 text-xs mb-1">Registered</p>
-      <p id="s_total" class="text-3xl font-bold text-white">—</p>
-    </div>
-    <div class="bg-gray-900 rounded-xl p-4 border border-green-800">
-      <p class="text-gray-400 text-xs mb-1">Connected</p>
-      <p id="s_connected" class="text-3xl font-bold text-green-400">—</p>
-    </div>
-    <div class="bg-gray-900 rounded-xl p-4 border border-yellow-800">
-      <p class="text-gray-400 text-xs mb-1">Not Connected</p>
-      <p id="s_offline" class="text-3xl font-bold text-yellow-400">—</p>
-    </div>
-    <div class="bg-gray-900 rounded-xl p-4 border border-red-800">
-      <p class="text-gray-400 text-xs mb-1">Suspicious</p>
-      <p id="s_suspicious" class="text-3xl font-bold text-red-400">—</p>
-    </div>
-    <div class="bg-gray-900 rounded-xl p-4 border border-blue-800">
-      <p class="text-gray-400 text-xs mb-1">Code Snapshots</p>
-      <p id="s_snapshots" class="text-3xl font-bold text-blue-400">—</p>
-    </div>
-  </div>
-
-  <!-- Tabs -->
-  <div class="flex gap-1 mb-4 bg-gray-900 rounded-xl p-1 w-fit border border-gray-800">
-    <button id="tab_all" onclick="setTab('all')"
-      class="px-4 py-2 rounded-lg text-sm font-medium bg-blue-600 text-white transition">
-      All Students
-    </button>
-    <button id="tab_connected" onclick="setTab('connected')"
-      class="px-4 py-2 rounded-lg text-sm font-medium text-gray-400 hover:text-white transition">
-      🟢 Connected
-    </button>
-    <button id="tab_offline" onclick="setTab('offline')"
-      class="px-4 py-2 rounded-lg text-sm font-medium text-gray-400 hover:text-white transition">
-      🔴 Not Connected
-    </button>
-    <button id="tab_flagged" onclick="setTab('flagged')"
-      class="px-4 py-2 rounded-lg text-sm font-medium text-gray-400 hover:text-white transition">
-      ⚠️ Suspicious
-    </button>
-  </div>
-
-  <!-- Main Grid -->
-  <div class="grid grid-cols-3 gap-5">
-
-    <!-- Student List -->
-    <div class="col-span-2 bg-gray-900 rounded-xl border border-gray-800">
-      <div class="p-4 border-b border-gray-800 flex justify-between items-center">
-        <h2 class="text-white font-semibold">👥 Students</h2>
-        <div class="flex items-center gap-3">
-          <input id="search_input"
-            oninput="filterStudents()"
-            placeholder="Search by name or ID..."
-            class="bg-gray-800 text-white text-sm px-3 py-1 rounded-lg
-                   border border-gray-700 focus:outline-none
-                   focus:border-blue-500 w-48"/>
-          <span class="text-gray-500 text-xs" id="student_count"></span>
-        </div>
-      </div>
-
-      <!-- Table Header -->
-      <div class="grid grid-cols-5 gap-2 px-4 py-2 border-b border-gray-800
-                  text-gray-500 text-xs font-medium uppercase">
-        <div class="col-span-2">Student</div>
-        <div class="text-center">Status</div>
-        <div class="text-center">Score</div>
-        <div class="text-center">Actions</div>
-      </div>
-
-      <div id="student_list"
-        class="divide-y divide-gray-800 max-h-96 overflow-y-auto scrollbar-thin">
-        <div class="p-8 text-center text-gray-500">Loading students...</div>
-      </div>
-    </div>
-
-    <!-- Live Feed -->
-    <div class="bg-gray-900 rounded-xl border border-gray-800 flex flex-col">
-      <div class="p-4 border-b border-gray-800 flex justify-between items-center">
-        <div class="flex items-center gap-2">
-          <span class="w-2 h-2 rounded-full bg-green-400 animate-pulse"></span>
-          <h2 class="text-white font-semibold">⚡ Live Feed</h2>
-        </div>
-        <button onclick="clearFeed()"
-          class="text-gray-500 text-xs hover:text-gray-300">Clear</button>
-      </div>
-      <div id="live_feed"
-        class="flex-1 p-3 space-y-2 max-h-96 overflow-y-auto scrollbar-thin">
-        <p class="text-gray-600 text-sm text-center py-8">Waiting for events...</p>
-      </div>
-    </div>
-
-  </div>
-</div>
-
-<!-- Student Detail Modal -->
-<div id="modal"
-  class="hidden fixed inset-0 bg-black bg-opacity-80
-         flex items-center justify-center z-50 p-4">
-  <div class="bg-gray-900 rounded-2xl border border-gray-700
-              w-full max-w-4xl max-h-screen flex flex-col">
-
-    <!-- Modal Header -->
-    <div class="p-6 border-b border-gray-700 flex justify-between items-start">
+      <a href="/"><img src="/assets/ewu-logo.svg" alt="East West University" class="ewu-logo"></a>
       <div>
-        <div class="flex items-center gap-3">
-          <div id="m_status_dot" class="w-3 h-3 rounded-full bg-gray-500"></div>
-          <h2 id="m_name" class="text-xl font-bold text-white"></h2>
-        </div>
-        <p id="m_id" class="text-gray-400 text-sm mt-1"></p>
-        <div class="flex gap-4 mt-2">
-          <span class="text-gray-500 text-xs">
-            Pastes: <span id="m_pastes" class="text-yellow-400 font-bold"></span>
-          </span>
-          <span class="text-gray-500 text-xs">
-            Tab Switches: <span id="m_tabs" class="text-orange-400 font-bold"></span>
-          </span>
-          <span class="text-gray-500 text-xs">
-            Snapshots: <span id="m_snaps" class="text-blue-400 font-bold"></span>
-          </span>
-          <span class="text-gray-500 text-xs">
-            AI Score: <span id="m_score" class="font-bold"></span>
-          </span>
-        </div>
-      </div>
-      <button onclick="closeModal()"
-        class="text-gray-500 hover:text-white text-3xl leading-none">&times;</button>
-    </div>
-
-    <!-- Modal Tabs -->
-    <div class="flex border-b border-gray-700 px-6">
-      <button onclick="modalTab('events')" id="mt_events"
-        class="py-3 px-4 text-sm font-medium text-blue-400
-               border-b-2 border-blue-400">
-        📋 Events
-      </button>
-      <button onclick="modalTab('code')" id="mt_code"
-        class="py-3 px-4 text-sm font-medium text-gray-500
-               border-b-2 border-transparent hover:text-gray-300">
-        💻 Code Snapshots
-      </button>
-    </div>
-
-    <!-- Events Tab -->
-    <div id="mc_events" class="flex-1 p-6 overflow-y-auto scrollbar-thin">
-      <div id="m_events_list" class="space-y-2">
-        <p class="text-gray-500 text-sm">Loading...</p>
+        <h1 class="text-white text-xl leading-tight">Administration</h1>
+        <p class="text-xs">East West University &middot; Technical Screening Platform</p>
       </div>
     </div>
-
-    <!-- Code Tab -->
-    <div id="mc_code" class="hidden flex-1 p-6 overflow-y-auto scrollbar-thin">
-      <div id="m_code_list" class="space-y-4">
-        <p class="text-gray-500 text-sm">Loading...</p>
-      </div>
+    <div class="flex items-center gap-3">
+      <span id="who" class="text-sm hidden md:inline"></span>
+      <button onclick="logout()" class="bg-red-600 text-white px-4 py-2 rounded-lg text-sm font-medium">Sign out</button>
     </div>
-
   </div>
+</header>
+
+<main class="max-w-screen-xl mx-auto p-5 space-y-6">
+
+  <!-- Summary -->
+  <section class="grid grid-cols-2 md:grid-cols-4 gap-4" aria-label="Summary">
+    <div class="bg-gray-900 rounded-xl p-5"><p class="text-gray-400 text-sm mb-1">Teachers</p><p id="ov_teachers" class="ewu-stat">&ndash;</p></div>
+    <div class="bg-gray-900 rounded-xl p-5"><p class="text-gray-400 text-sm mb-1">Students</p><p id="ov_students" class="ewu-stat">&ndash;</p></div>
+    <div class="bg-gray-900 rounded-xl p-5"><p class="text-gray-400 text-sm mb-1">Classes</p><p id="ov_classes" class="ewu-stat">&ndash;</p></div>
+    <div class="bg-gray-900 rounded-xl p-5"><p class="text-gray-400 text-sm mb-1">Saved datasets</p><p id="ov_datasets" class="ewu-stat">&ndash;</p></div>
+  </section>
+
+  <div id="banner" class="hidden p-3 rounded-lg text-sm font-medium" role="alert"></div>
+
+  <!-- Teacher sign-up code -->
+  <section class="bg-gray-900 rounded-xl p-4 flex items-center gap-3 flex-wrap">
+    <div>
+      <h2 class="text-white text-lg">Teacher sign-up code</h2>
+      <p class="text-gray-400 text-sm">Give this code to a teacher so they can create their own account on the Register page.</p>
+    </div>
+    <label for="teacher_code_input" class="sr-only">Teacher sign-up code</label>
+    <input id="teacher_code_input" type="text" placeholder="No code set" maxlength="64"
+      class="ml-auto font-mono px-3 py-2 text-sm w-56"/>
+    <button onclick="saveTeacherCode()" class="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium">Save code</button>
+    <button onclick="genTeacherCode()" class="bg-gray-700 text-white px-4 py-2 rounded-lg text-sm font-medium">Generate</button>
+  </section>
+
+  <!-- Teachers and datasets -->
+  <section class="grid lg:grid-cols-2 gap-5">
+    <div class="bg-gray-900 rounded-xl overflow-hidden">
+      <div class="px-4 py-3 border-b border-gray-800"><h2 class="text-white text-lg">Teachers</h2></div>
+      <div class="overflow-auto max-h-72">
+        <table class="w-full text-sm">
+          <thead><tr class="text-left"><th class="px-4 py-2">Name</th><th class="px-4 py-2">Email</th><th class="text-right px-4 py-2">Classes</th><th class="text-right px-4 py-2">Students</th></tr></thead>
+          <tbody id="ov_teacher_rows"><tr><td colspan="4" class="px-4 py-6 text-center text-gray-500">Loading&hellip;</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="bg-gray-900 rounded-xl overflow-hidden">
+      <div class="px-4 py-3 border-b border-gray-800 flex items-center justify-between">
+        <h2 class="text-white text-lg">Student datasets</h2>
+        <span class="text-xs text-gray-500">Kept for 30 days</span>
+      </div>
+      <div class="overflow-auto max-h-72">
+        <table class="w-full text-sm">
+          <thead><tr class="text-left"><th class="px-4 py-2">File</th><th class="px-4 py-2">Course</th><th class="px-4 py-2">Teacher</th><th class="px-4 py-2"><span class="sr-only">Download</span></th></tr></thead>
+          <tbody id="ov_dataset_rows"><tr><td colspan="4" class="px-4 py-6 text-center text-gray-500">Loading&hellip;</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- Users -->
+  <section class="bg-gray-900 rounded-xl border border-gray-800">
+    <div class="p-4 border-b border-gray-800 flex justify-between items-center gap-3 flex-wrap">
+      <h2 class="text-white text-lg">User accounts <span id="count" class="text-gray-500 font-normal text-sm"></span></h2>
+      <div class="flex items-center gap-2 flex-wrap">
+        <input id="search" placeholder="Search name, email or ID…" aria-label="Search users"
+          class="bg-gray-800 text-white text-sm px-3 py-2 rounded-lg border border-gray-700 focus:outline-none focus:border-blue-500 w-56"/>
+        <select id="role_filter" aria-label="Filter by role"
+          class="bg-gray-800 text-white text-sm px-3 py-2 rounded-lg border border-gray-700 focus:outline-none focus:border-blue-500">
+          <option value="">All roles</option>
+          <option value="student">Student</option>
+          <option value="teacher">Teacher</option>
+          <option value="admin">Admin</option>
+        </select>
+        <button id="csv_btn" class="bg-gray-700 text-white text-sm font-medium px-4 py-2 rounded-lg">Export CSV</button>
+        <button id="dataset_btn" class="bg-gray-700 text-white text-sm font-medium px-4 py-2 rounded-lg">Download all sessions (JSON)</button>
+        <input id="bulk_upload_input" type="file" accept=".xlsx,.csv" class="hidden"/>
+        <button id="bulk_upload_btn" class="bg-blue-600 text-white text-sm font-medium px-4 py-2 rounded-lg">Upload students (.xlsx / .csv)</button>
+      </div>
+    </div>
+
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm min-w-[860px]">
+        <thead>
+          <tr class="text-gray-500 text-xs uppercase border-b border-gray-800 text-left">
+            <th class="px-4 py-3 font-medium">Name</th>
+            <th class="px-4 py-3 font-medium">Email</th>
+            <th class="px-4 py-3 font-medium">Role</th>
+            <th class="px-4 py-3 font-medium">Created</th>
+            <th class="px-4 py-3 font-medium">Last active</th>
+            <th class="px-4 py-3 font-medium text-right">Actions</th>
+          </tr>
+        </thead>
+        <tbody id="rows" class="divide-y divide-gray-800">
+          <tr><td colspan="6" class="px-4 py-10 text-center text-gray-500">Loading users…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- Danger zone -->
+  <section class="bg-gray-900 rounded-xl border border-red-900/70">
+    <div class="p-4 flex items-center justify-between gap-4 flex-wrap">
+      <div class="max-w-2xl">
+        <h2 class="text-red-300 text-lg">Danger zone</h2>
+        <p class="text-gray-400 text-sm mt-1">
+          Reset session data clears all live sessions, code snapshots, events and heartbeats.
+          User accounts, classes, submissions and teacher labels are kept.
+        </p>
+      </div>
+      <button id="reset_btn" class="bg-red-700 hover:bg-red-600 text-white text-sm font-semibold px-4 py-2 rounded-lg">Reset Session Data</button>
+    </div>
+  </section>
+</main>
+
+<!-- Change password -->
+<div id="pwmodal" class="hidden fixed inset-0 bg-black/75 flex items-center justify-center z-50 p-4" role="dialog" aria-modal="true" aria-labelledby="pw_title">
+  <form id="pw_form" class="bg-gray-900 rounded-2xl w-full max-w-md p-6" autocomplete="off">
+    <h3 id="pw_title" class="text-white text-xl">Change password</h3>
+    <p id="pw_who" class="text-gray-300 text-sm mt-1"></p>
+    <label for="pw_new" class="block text-sm font-medium text-gray-300 mt-4 mb-1">New password</label>
+    <input id="pw_new" type="text" minlength="6" maxlength="72" class="w-full px-3 py-2 text-sm" autocomplete="new-password"/>
+    <p class="text-gray-500 text-xs mt-2">At least 6 characters. Tell the person the new password yourself; they can sign in with it straight away. This also unlocks the account if it was locked.</p>
+    <div class="flex justify-end gap-2 mt-5">
+      <button type="button" id="pw_cancel" class="px-4 py-2 rounded-lg text-sm bg-gray-700 text-white">Cancel</button>
+      <button type="submit" id="pw_go" class="px-4 py-2 rounded-lg text-sm bg-blue-600 text-white font-medium">Save password</button>
+    </div>
+  </form>
+</div>
+
+<!-- Delete confirmation -->
+<div id="confirm" class="hidden fixed inset-0 bg-black/75 flex items-center justify-center z-50 p-4">
+  <div class="bg-gray-900 rounded-2xl border border-gray-700 w-full max-w-md p-6">
+    <h3 class="text-white font-semibold text-lg">Delete this user?</h3>
+    <p id="confirm_who" class="text-gray-300 text-sm mt-2"></p>
+    <p class="text-gray-500 text-xs mt-3">
+      This permanently removes the account and everything recorded about it: sessions, submissions,
+      code snapshots, behavioural data and labels. Classes a teacher owns are removed too. Labels a
+      teacher wrote about other students are kept. This cannot be undone.
+    </p>
+    <div class="flex justify-end gap-2 mt-5">
+      <button id="confirm_cancel" class="px-4 py-2 rounded-lg text-sm bg-gray-700 hover:bg-gray-600 text-white">Cancel</button>
+      <button id="confirm_ok" class="px-4 py-2 rounded-lg text-sm bg-red-600 hover:bg-red-700 text-white font-medium">Delete permanently</button>
+    </div>
+  </div>
+</div>
+
+<!-- Reset: confirmation 1 of 2 -->
+<div id="reset1" class="hidden fixed inset-0 bg-black/75 flex items-center justify-center z-50 p-4">
+  <div class="bg-gray-900 rounded-2xl border border-red-800 w-full max-w-md p-6">
+    <p class="text-red-400 text-xs font-semibold uppercase tracking-wide">Confirmation 1 of 2</p>
+    <h3 class="text-white font-semibold text-lg mt-1">Reset all session data?</h3>
+    <div class="grid grid-cols-2 gap-3 mt-4 text-sm">
+      <div class="bg-red-950/40 border border-red-900 rounded-lg p-3">
+        <p class="text-red-300 font-medium mb-1">Will be deleted</p>
+        <ul class="text-gray-300 space-y-0.5 text-xs">
+          <li>Sessions <span id="r1_sessions" class="text-gray-500"></span></li>
+          <li>Code snapshots <span id="r1_snaps" class="text-gray-500"></span></li>
+          <li>Events</li><li>Heartbeats</li>
+        </ul>
+      </div>
+      <div class="bg-green-950/30 border border-green-900 rounded-lg p-3">
+        <p class="text-green-300 font-medium mb-1">Will be kept</p>
+        <ul class="text-gray-300 space-y-0.5 text-xs">
+          <li>User accounts</li><li>Classes &amp; lab history</li>
+          <li>Submissions</li><li>Teacher labels*</li>
+        </ul>
+      </div>
+    </div>
+    <p class="text-gray-500 text-xs mt-3">
+      *Labels stay but lose their link to the deleted session, so they won't appear in dataset exports.
+      Export the dataset first if you still need it. This cannot be undone.
+    </p>
+    <div class="flex justify-end gap-2 mt-5">
+      <button id="reset1_cancel" class="px-4 py-2 rounded-lg text-sm bg-gray-700 hover:bg-gray-600 text-white">Cancel</button>
+      <button id="reset1_next" class="px-4 py-2 rounded-lg text-sm bg-red-700 hover:bg-red-600 text-white font-medium">Continue</button>
+    </div>
+  </div>
+</div>
+
+<!-- Reset: confirmation 2 of 2 -->
+<div id="reset2" class="hidden fixed inset-0 bg-black/80 flex items-center justify-center z-[60] p-4">
+  <form id="reset2_form" class="bg-gray-900 rounded-2xl border border-red-700 w-full max-w-md p-6" autocomplete="off">
+    <p class="text-red-400 text-xs font-semibold uppercase tracking-wide">Confirmation 2 of 2</p>
+    <h3 class="text-white font-semibold text-lg mt-1">Type RESET to confirm</h3>
+    <p class="text-gray-400 text-sm mt-2">This permanently deletes all session data right now.</p>
+    <input id="reset_phrase" placeholder="RESET" aria-label="Type RESET to confirm"
+      class="mt-4 w-full bg-gray-800 text-white font-mono tracking-widest text-center border border-gray-700 rounded-lg px-3 py-2
+             focus:outline-none focus:border-red-500"/>
+    <div class="flex justify-end gap-2 mt-5">
+      <button type="button" id="reset2_cancel" class="px-4 py-2 rounded-lg text-sm bg-gray-700 hover:bg-gray-600 text-white">Cancel</button>
+      <button type="submit" id="reset2_go" disabled
+        class="px-4 py-2 rounded-lg text-sm bg-red-600 hover:bg-red-700 text-white font-semibold disabled:opacity-40 disabled:cursor-not-allowed">
+        Delete session data
+      </button>
+    </div>
+  </form>
 </div>
 
 <script>
-const API       = 'https://screening-platform-tpku.onrender.com';
-const token     = localStorage.getItem('token');
-const adminName = localStorage.getItem('full_name');
-const role      = localStorage.getItem('role');
+const API   = location.origin;
+const token = localStorage.getItem('token');
+const role  = localStorage.getItem('role');
+const me    = localStorage.getItem('student_id');
 
-if (!token || role !== 'admin') {
-  window.location.href = '/';
+if (!token || role !== 'admin') { window.location.href = '/admin/login'; }
+document.getElementById('who').textContent = localStorage.getItem('full_name') || '';
+
+let users = [];
+
+// ── helpers ────────────────────────────────────────────────────
+function esc(v) {
+  return String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
-
-document.getElementById('admin_name').textContent = adminName || 'Admin';
-
-let ws           = null;
-let allStudents  = [];
-let currentTab   = 'all';
-let selectedId   = null;
-
-// ── WEBSOCKET ──────────────────────────────────────────────────
-function connectWS() {
-  try {
-    ws = new WebSocket('wss://screening-platform-tpku.onrender.com/ws/admin?token=' + encodeURIComponent(token));
-
-    ws.onopen = () => {
-      const badge = document.getElementById('ws_badge');
-      badge.innerHTML = `
-        <span class="w-2 h-2 rounded-full bg-green-400 animate-pulse"></span>
-        Live
-      `;
-      badge.className =
-        'flex items-center gap-2 px-3 py-1 rounded-full text-xs bg-green-900 text-green-300 font-medium';
-      console.log('WebSocket connected');
-    };
-
-    ws.onmessage = (e) => {
-      try {
-        const data = JSON.parse(e.data);
-        handleWSEvent(data);
-      } catch (err) {
-        console.error('WS message error:', err);
-      }
-    };
-
-    ws.onclose = () => {
-      const badge = document.getElementById('ws_badge');
-      badge.innerHTML = `
-        <span class="w-2 h-2 rounded-full bg-red-400 animate-pulse"></span>
-        Reconnecting...
-      `;
-      badge.className =
-        'flex items-center gap-2 px-3 py-1 rounded-full text-xs bg-red-900 text-red-300 font-medium';
-      setTimeout(connectWS, 3000);
-    };
-
-    ws.onerror = () => ws.close();
-
-  } catch (err) {
-    console.error('WS error:', err);
-    setTimeout(connectWS, 3000);
+function errorText(d, fb) {
+  const x = d && d.detail;
+  if (typeof x === 'string' && x) return x;
+  if (Array.isArray(x) && x.length) return x.map(e => e && e.msg ? e.msg : JSON.stringify(e)).join('; ');
+  return fb;
+}
+async function request(path, opts = {}) {
+  const res = await fetch(API + path, { ...opts, headers: { 'Authorization': `Bearer ${token}`, ...(opts.headers || {}) } });
+  if (res.status === 401) { localStorage.clear(); window.location.href = '/admin/login'; throw new Error('Session expired'); }
+  if (!res.ok) {
+    const d = await res.json().catch(() => null);
+    throw new Error(errorText(d, `Request failed (${res.status})`));
   }
+  return res;
 }
+const getJSON = async (p, o) => (await request(p, o)).json();
 
-// ── HANDLE EVENTS ──────────────────────────────────────────────
-function handleWSEvent(data) {
-  addToFeed(data);
-
-  if (data.type === 'STUDENT_CONNECTED' ||
-      data.type === 'STUDENT_DISCONNECTED') {
-    loadStudents();
-  }
-
-  if (data.type === 'HEARTBEAT') {
-    const student = allStudents.find(s => s.student_id === data.student_id);
-    if (student) {
-      student.suspicious_score = data.suspicious_score;
-    }
-  }
-
-  if (data.severity === 'HIGH' ||
-      data.type === 'STUDENT_DISCONNECTED' ||
-      data.type === 'AI_DETECTION_ALERT') {
-    playAlert();
-  }
+function banner(msg, kind) {
+  const el = document.getElementById('banner');
+  el.textContent = msg;
+  el.className = 'p-3 rounded-lg text-sm font-medium ' + (kind === 'err' ? 'bg-red-900/70 text-red-200' : 'bg-green-900/70 text-green-200');
+  clearTimeout(banner._t);
+  banner._t = setTimeout(() => el.className = 'hidden', 6000);
 }
-
-function playAlert() {
-  try {
-    const ctx  = new (window.AudioContext || window.webkitAudioContext)();
-    const osc  = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-    osc.frequency.value = 880;
-    gain.gain.setValueAtTime(0.3, ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
-    osc.start(ctx.currentTime);
-    osc.stop(ctx.currentTime + 0.3);
-  } catch (e) {}
+function parseUTC(s) {
+  if (!s) return null;
+  let t = String(s).replace(' ', 'T');
+  if (!/[zZ]|[+-]\d\d:?\d\d$/.test(t)) t += 'Z';
+  const d = new Date(t);
+  return isNaN(d) ? null : d;
 }
-
-// ── LIVE FEED ──────────────────────────────────────────────────
-function addToFeed(data) {
-  const feed    = document.getElementById('live_feed');
-  const waiting = feed.querySelector('p');
-  if (waiting) waiting.remove();
-
-  const time = new Date().toLocaleTimeString();
-  const div  = document.createElement('div');
-
-  let cls = 'bg-gray-800 border-gray-700';
-  if (data.type === 'STUDENT_CONNECTED')    cls = 'bg-green-950 border-green-800';
-  if (data.type === 'STUDENT_DISCONNECTED') cls = 'bg-red-950 border-red-800';
-  if (data.severity === 'HIGH')             cls = 'bg-red-950 border-red-800';
-  if (data.type === 'AI_DETECTION_ALERT')   cls = 'bg-purple-950 border-purple-800';
-  if (data.severity === 'MEDIUM')           cls = 'bg-yellow-950 border-yellow-800';
-
-  div.className = `${cls} border rounded-lg p-2 text-xs`;
-  div.innerHTML = `
-    <div class="flex justify-between items-start gap-2">
-      <p class="text-white font-medium leading-tight">
-        ${data.message || data.type}
-      </p>
-      <span class="text-gray-500 whitespace-nowrap">${time}</span>
-    </div>
-  `;
-
-  feed.insertBefore(div, feed.firstChild);
-  while (feed.children.length > 80) feed.removeChild(feed.lastChild);
+function fmtDate(s) { const d = parseUTC(s); return d ? d.toLocaleDateString() : '—'; }
+function ago(s) {
+  const d = parseUTC(s);
+  if (!d) return 'Never';
+  const sec = Math.max(0, Math.round((Date.now() - d) / 1000));
+  if (sec < 60) return 'Just now';
+  if (sec < 3600) return Math.floor(sec / 60) + ' min ago';
+  if (sec < 86400) return Math.floor(sec / 3600) + ' h ago';
+  if (sec < 86400 * 30) return Math.floor(sec / 86400) + ' d ago';
+  return d.toLocaleDateString();
 }
-
-function clearFeed() {
-  document.getElementById('live_feed').innerHTML =
-    '<p class="text-gray-600 text-sm text-center py-8">Feed cleared</p>';
-}
-
-// ── LOAD STUDENTS ──────────────────────────────────────────────
-async function loadStudents() {
-  try {
-    const res   = await fetch(`${API}/admin/all-students`, { headers: { 'Authorization': `Bearer ${token}` } });
-    allStudents = await res.json();
-    renderStudents();
-    updateStats();
-  } catch (err) {
-    console.error('Failed to load students:', err);
-  }
-}
-
-function renderStudents() {
-  const search = document.getElementById('search_input').value.toLowerCase();
-  let filtered = allStudents;
-
-  if (currentTab === 'connected') filtered = allStudents.filter(s => s.is_connected);
-  if (currentTab === 'offline')   filtered = allStudents.filter(s => !s.is_connected);
-  if (currentTab === 'flagged')   filtered = allStudents.filter(s => s.suspicious_score >= 50);
-
-  if (search) {
-    filtered = filtered.filter(s =>
-      s.full_name.toLowerCase().includes(search) ||
-      s.student_id.toLowerCase().includes(search)
-    );
-  }
-
-  document.getElementById('student_count').textContent =
-    `${filtered.length} students`;
-
-  const list = document.getElementById('student_list');
-  list.innerHTML = '';
-
-  if (filtered.length === 0) {
-    list.innerHTML =
-      '<div class="p-8 text-center text-gray-500 text-sm">No students found</div>';
-    return;
-  }
-
-  filtered.forEach(s => {
-    const score    = s.suspicious_score || 0;
-    const scoreClr = score >= 70 ? 'text-red-400' :
-                     score >= 40 ? 'text-yellow-400' : 'text-green-400';
-
-    const row = document.createElement('div');
-    row.className =
-      'grid grid-cols-5 gap-2 px-4 py-3 items-center hover:bg-gray-800 transition cursor-pointer';
-
-    row.innerHTML = `
-      <div class="col-span-2 flex items-center gap-3">
-        <div class="w-2 h-2 rounded-full flex-shrink-0
-          ${s.is_connected ? 'bg-green-500 animate-pulse' : 'bg-gray-600'}">
-        </div>
-        <div>
-          <p class="text-white text-sm font-medium">${s.full_name}</p>
-          <p class="text-gray-500 text-xs font-mono">${s.student_id}</p>
-        </div>
-      </div>
-      <div class="text-center">
-        ${s.is_connected
-          ? '<span class="px-2 py-1 bg-green-900 text-green-300 rounded-full text-xs">🟢 Online</span>'
-          : '<span class="px-2 py-1 bg-gray-800 text-gray-400 rounded-full text-xs">⚫ Offline</span>'
-        }
-      </div>
-      <div class="text-center">
-        <span class="text-lg font-bold ${scoreClr}">${score}</span>
-        <span class="text-gray-600 text-xs">/100</span>
-      </div>
-      <div class="text-center">
-        <button
-          onclick="event.stopPropagation(); openModal('${s.student_id}')"
-          class="bg-blue-600 hover:bg-blue-700 text-white
-                 px-3 py-1 rounded-lg text-xs transition">
-          Details
-        </button>
-      </div>
-    `;
-
-    row.onclick = () => openModal(s.student_id);
-    list.appendChild(row);
-  });
-}
-
-function updateStats() {
-  const total      = allStudents.length;
-  const connected  = allStudents.filter(s => s.is_connected).length;
-  const offline    = total - connected;
-  const suspicious = allStudents.filter(s => s.suspicious_score >= 50).length;
-  const snaps      = allStudents.reduce((a, s) => a + (s.snapshots || 0), 0);
-
-  document.getElementById('s_total').textContent      = total;
-  document.getElementById('s_connected').textContent  = connected;
-  document.getElementById('s_offline').textContent    = offline;
-  document.getElementById('s_suspicious').textContent = suspicious;
-  document.getElementById('s_snapshots').textContent  = snaps;
-}
-
-function filterStudents() {
-  renderStudents();
-}
-
-function setTab(tab) {
-  currentTab = tab;
-  ['all', 'connected', 'offline', 'flagged'].forEach(t => {
-    const btn = document.getElementById(`tab_${t}`);
-    if (t === tab) {
-      btn.className =
-        'px-4 py-2 rounded-lg text-sm font-medium bg-blue-600 text-white transition';
-    } else {
-      btn.className =
-        'px-4 py-2 rounded-lg text-sm font-medium text-gray-400 hover:text-white transition';
-    }
-  });
-  renderStudents();
-}
-
-// ── MODAL ──────────────────────────────────────────────────────
-async function openModal(studentId) {
-  selectedId = studentId;
-  const s    = allStudents.find(x => x.student_id === studentId);
-  if (!s) return;
-
-  document.getElementById('m_name').textContent   = s.full_name;
-  document.getElementById('m_id').textContent     = s.student_id;
-  document.getElementById('m_pastes').textContent = s.paste_count || 0;
-  document.getElementById('m_tabs').textContent   = s.tab_switches || 0;
-  document.getElementById('m_snaps').textContent  = s.snapshots || 0;
-
-  const score   = s.suspicious_score || 0;
-  const scoreEl = document.getElementById('m_score');
-  scoreEl.textContent = `${score}/100`;
-  scoreEl.className   =
-    score >= 70 ? 'font-bold text-red-400' :
-    score >= 40 ? 'font-bold text-yellow-400' :
-                  'font-bold text-green-400';
-
-  const dot = document.getElementById('m_status_dot');
-  dot.className = `w-3 h-3 rounded-full ${s.is_connected ? 'bg-green-500 animate-pulse' : 'bg-gray-500'}`;
-
-  document.getElementById('modal').classList.remove('hidden');
-  modalTab('events');
-  await loadEvents(studentId);
-}
-
-function closeModal() {
-  document.getElementById('modal').classList.add('hidden');
-  selectedId = null;
-}
-
-function modalTab(tab) {
-  document.getElementById('mc_events').classList.toggle('hidden', tab !== 'events');
-  document.getElementById('mc_code').classList.toggle('hidden', tab !== 'code');
-
-  ['events', 'code'].forEach(t => {
-    const btn = document.getElementById(`mt_${t}`);
-    if (t === tab) {
-      btn.className =
-        'py-3 px-4 text-sm font-medium text-blue-400 border-b-2 border-blue-400';
-    } else {
-      btn.className =
-        'py-3 px-4 text-sm font-medium text-gray-500 border-b-2 border-transparent hover:text-gray-300';
-    }
-  });
-
-  if (tab === 'code' && selectedId) loadCode(selectedId);
-}
-
-// ── LOAD EVENTS ────────────────────────────────────────────────
-async function loadEvents(studentId) {
-  try {
-    const res    = await fetch(`${API}/admin/students/${studentId}/events`, { headers: { 'Authorization': `Bearer ${token}` } });
-    const events = await res.json();
-    const list   = document.getElementById('m_events_list');
-
-    if (events.length === 0) {
-      list.innerHTML =
-        '<p class="text-gray-500 text-sm">No events recorded yet</p>';
-      return;
-    }
-
-    list.innerHTML = events.map(e => {
-      const colors = {
-        HIGH:   'bg-red-950 border-red-700 text-red-300',
-        MEDIUM: 'bg-yellow-950 border-yellow-700 text-yellow-300',
-        LOW:    'bg-blue-950 border-blue-700 text-blue-300',
-        INFO:   'bg-gray-800 border-gray-700 text-gray-300',
-      };
-      const cls = colors[e.severity] || colors.INFO;
-      return `
-        <div class="${cls} border rounded-lg p-3">
-          <div class="flex justify-between items-center">
-            <span class="font-medium text-sm">
-              ${e.event_type.replace(/_/g, ' ')}
-            </span>
-            <span class="text-xs opacity-70 ml-2">
-              ${new Date(e.timestamp).toLocaleString()}
-            </span>
-          </div>
-          <span class="text-xs opacity-60">Severity: ${e.severity}</span>
-        </div>
-      `;
-    }).join('');
-  } catch (err) {
-    console.error('Failed to load events:', err);
-  }
-}
-
-// ── LOAD CODE ──────────────────────────────────────────────────
-async function loadCode(studentId) {
-  try {
-    const res   = await fetch(`${API}/admin/students/${studentId}/code`, { headers: { 'Authorization': `Bearer ${token}` } });
-    const snaps = await res.json();
-    const list  = document.getElementById('m_code_list');
-
-    if (snaps.length === 0) {
-      list.innerHTML =
-        '<p class="text-gray-500 text-sm">No code snapshots yet</p>';
-      return;
-    }
-
-    list.innerHTML = snaps.map(s => {
-      const aiClr = s.ai_score >= 70 ? 'text-red-400' :
-                    s.ai_score >= 40 ? 'text-yellow-400' : 'text-green-400';
-      const code  = (s.code || '')
-        .substring(0, 600)
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;');
-      return `
-        <div class="bg-gray-800 rounded-xl border border-gray-700 p-4">
-          <div class="flex justify-between items-center mb-2">
-            <span class="text-white font-medium text-sm">
-              Snapshot #${s.snapshot_number}
-            </span>
-            <span class="${aiClr} font-bold text-sm">AI: ${s.ai_score}%</span>
-          </div>
-          <div class="flex gap-4 text-xs text-gray-500 mb-3">
-            <span>Lang: ${s.language || 'unknown'}</span>
-            <span>Lines: ${s.line_count}</span>
-            <span>${new Date(s.timestamp).toLocaleString()}</span>
-          </div>
-          <pre class="bg-gray-950 rounded-lg p-3 text-green-400 text-xs
-                      overflow-x-auto max-h-40 overflow-y-auto font-mono
-                      scrollbar-thin">${code}${s.code && s.code.length > 600 ? '\n...' : ''}</pre>
-        </div>
-      `;
-    }).join('');
-  } catch (err) {
-    console.error('Failed to load code:', err);
-  }
-}
-
-// ── LOGOUT ─────────────────────────────────────────────────────
 function logout() {
-  if (ws) ws.close();
-  const el = document.createElement('div');
-  el.textContent = '👋 Logged out';
-  el.style.cssText = 'position:fixed;bottom:20px;right:20px;z-index:9999;background:#064e3b;color:#a7f3d0;padding:10px 16px;border-radius:8px;font-size:14px;font-weight:600;box-shadow:0 4px 12px rgba(0,0,0,.4);';
-  document.body.appendChild(el);
-  setTimeout(() => {
-    localStorage.clear();
-    window.location.href = '/';
-  }, 2000);
+  localStorage.clear(); window.location.href = '/admin/login';
 }
 
-// ── INIT ───────────────────────────────────────────────────────
-connectWS();
-loadStudents();
-setInterval(loadStudents, 10000);
+// ── overview: totals, teachers, datasets ───────────────────────
+async function loadOverview() {
+  try {
+    const d = await getJSON('/admin/overview');
+    for (const k of ['teachers', 'students', 'classes', 'datasets']) document.getElementById('ov_' + k).textContent = d.totals[k];
+    document.getElementById('ov_teacher_rows').innerHTML = d.teachers.length ? d.teachers.map(x =>
+      `<tr class="border-t border-gray-800"><td class="px-4 py-2">${esc(x.name || x.id)}</td><td class="px-4 py-2 text-gray-400">${esc(x.email)}</td>
+       <td class="px-4 py-2 text-right">${x.classes}</td><td class="px-4 py-2 text-right">${x.students}</td></tr>`).join('')
+      : '<tr><td colspan="4" class="px-4 py-6 text-center text-gray-500">No teachers yet.</td></tr>';
+  } catch (e) { document.getElementById('ov_teacher_rows').innerHTML = `<tr><td colspan="4" class="px-4 py-6 text-center text-red-400">${esc(e.message)}</td></tr>`; }
+  try {
+    const rows = await getJSON('/admin/datasets');
+    document.getElementById('ov_dataset_rows').innerHTML = rows.length ? rows.map(x =>
+      `<tr class="border-t border-gray-800"><td class="px-4 py-2 font-mono text-xs">${esc(x.filename)}</td>
+       <td class="px-4 py-2">${esc(x.course)}${x.section ? ' &middot; ' + esc(x.section) : ''}</td><td class="px-4 py-2 text-gray-400">${esc(x.teacher)}</td>
+       <td class="px-4 py-2 text-right whitespace-nowrap"><button data-ds="${x.id}" data-name="${esc(x.filename)}" data-fmt="xlsx" class="bg-green-600 text-white px-3 py-1 rounded-lg text-xs mr-1">Excel</button><button data-ds="${x.id}" data-name="${esc(x.filename)}" data-fmt="json" class="bg-blue-600 text-white px-3 py-1 rounded-lg text-xs">JSON</button></td></tr>`).join('')
+      : '<tr><td colspan="4" class="px-4 py-6 text-center text-gray-500">No datasets yet. One is saved each time a teacher ends a lab.</td></tr>';
+  } catch (e) { document.getElementById('ov_dataset_rows').innerHTML = `<tr><td colspan="4" class="px-4 py-6 text-center text-red-400">${esc(e.message)}</td></tr>`; }
+}
+document.getElementById('ov_dataset_rows').addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-ds]'); if (!b) return;
+  const fmt = b.dataset.fmt, name = b.dataset.name;
+  try {
+    const blob = await (await request(`/admin/datasets/${b.dataset.ds}/download?format=${fmt}`)).blob();
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+    a.download = fmt === 'xlsx' ? name.replace(/\.json$/, '.xlsx') : name; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  } catch (err) { banner(err.message, 'err'); }
+});
+
+// ── teacher sign-up code ───────────────────────────────────────
+async function loadTeacherCode() {
+  try { document.getElementById('teacher_code_input').value = (await getJSON('/admin/teacher-code')).code || ''; } catch (e) {}
+}
+function genTeacherCode() {
+  const a = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  const bytes = crypto.getRandomValues(new Uint8Array(10));
+  document.getElementById('teacher_code_input').value = [...bytes].map(b => a[b % a.length]).join('');
+}
+async function saveTeacherCode() {
+  const code = document.getElementById('teacher_code_input').value.trim();
+  try {
+    await getJSON('/admin/teacher-code', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code }) });
+    banner('Teacher code saved. Share it with your teachers.', 'ok');
+  } catch (e) { banner(e.message, 'err'); }
+}
+
+// ── change a user's password ───────────────────────────────────
+let pwTarget = null;
+function askPassword(id) {
+  const u = users.find(x => x.student_id === id);
+  pwTarget = id;
+  document.getElementById('pw_who').textContent = u ? `${u.full_name || id} (${u.email || id}), ${u.role}` : id;
+  document.getElementById('pw_new').value = '';
+  document.getElementById('pwmodal').classList.remove('hidden');
+  document.getElementById('pw_new').focus();
+}
+function closePassword() { pwTarget = null; document.getElementById('pwmodal').classList.add('hidden'); }
+document.getElementById('pw_cancel').addEventListener('click', closePassword);
+document.getElementById('pw_form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const pw = document.getElementById('pw_new').value;
+  if (pw.length < 6) { banner('Password must be at least 6 characters', 'err'); return; }
+  const btn = document.getElementById('pw_go'); btn.disabled = true;
+  try {
+    const r = await getJSON(`/admin/users/${encodeURIComponent(pwTarget)}/password`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ new_password: pw }) });
+    banner(r.message, 'ok'); closePassword();
+  } catch (err) { banner(err.message, 'err'); }
+  btn.disabled = false;
+});
+
+// ── users table ────────────────────────────────────────────────
+const ROLE_STYLE = { student: 'bg-blue-900 text-blue-300', teacher: 'bg-purple-900 text-purple-300', admin: 'bg-red-900 text-red-300' };
+
+async function loadUsers() {
+  users = await getJSON('/admin/users');
+  render();
+}
+
+function render() {
+  const q = document.getElementById('search').value.trim().toLowerCase();
+  const r = document.getElementById('role_filter').value;
+  const rows = users.filter(u => (!r || u.role === r) &&
+    (!q || [u.full_name, u.email, u.student_id].some(v => (v || '').toLowerCase().includes(q))));
+  document.getElementById('count').textContent = `(${rows.length}${rows.length !== users.length ? ' of ' + users.length : ''})`;
+
+  document.getElementById('rows').innerHTML = rows.length ? rows.map(u => {
+    const isMe = u.student_id === me;
+    const badge = u.status === 'disabled'
+      ? '<span class="ml-2 px-2 py-0.5 rounded-full text-[11px] bg-gray-700 text-gray-300">Disabled</span>' : '';
+    const id = esc(u.student_id);
+    return `<tr class="hover:bg-gray-800/50">
+      <td class="px-4 py-3"><div class="text-white font-medium">${esc(u.full_name || '—')}${isMe ? ' <span class="text-gray-500 text-xs">(you)</span>' : ''}${badge}</div>
+          <div class="text-gray-500 text-xs">${id}</div></td>
+      <td class="px-4 py-3 text-gray-300">${esc(u.email || '—')}</td>
+      <td class="px-4 py-3"><span class="px-2 py-0.5 rounded-full text-xs font-semibold ${ROLE_STYLE[u.role] || 'bg-gray-700 text-gray-300'}">${esc(u.role)}</span></td>
+      <td class="px-4 py-3 text-gray-400">${esc(fmtDate(u.created_at))}</td>
+      <td class="px-4 py-3 text-gray-400">${esc(ago(u.last_active))}</td>
+      <td class="px-4 py-3 text-right whitespace-nowrap">
+        <button data-pw="${id}" class="px-3 py-1 rounded-lg text-xs font-medium bg-gray-700 text-white mr-1">Change password</button>
+        <button data-delete="${id}" ${isMe ? 'disabled title="You cannot delete your own account"' : ''}
+          class="px-3 py-1 rounded-lg text-xs font-medium bg-red-700 hover:bg-red-600 text-white disabled:opacity-40 disabled:cursor-not-allowed">Delete</button>
+      </td></tr>`;
+  }).join('') : '<tr><td colspan="6" class="px-4 py-10 text-center text-gray-500">No users match.</td></tr>';
+}
+
+document.getElementById('search').addEventListener('input', render);
+document.getElementById('role_filter').addEventListener('change', render);
+
+document.getElementById('rows').addEventListener('click', async (e) => {
+  const pw = e.target.closest('[data-pw]');
+  if (pw) { askPassword(pw.dataset.pw); return; }
+  const del = e.target.closest('[data-delete]');
+  if (del && !del.disabled) {
+    askDelete(del.dataset.delete);
+  }
+});
+
+// ── delete with confirmation ───────────────────────────────────
+let pendingDelete = null;
+function askDelete(id) {
+  const u = users.find(x => x.student_id === id);
+  pendingDelete = id;
+  document.getElementById('confirm_who').textContent = u ? `${u.full_name || id} (${u.email || id}) · ${u.role}` : id;
+  document.getElementById('confirm').classList.remove('hidden');
+}
+function closeConfirm() { pendingDelete = null; document.getElementById('confirm').classList.add('hidden'); }
+document.getElementById('confirm_cancel').addEventListener('click', closeConfirm);
+document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeConfirm(); closeReset(); closePassword(); } });
+document.getElementById('confirm_ok').addEventListener('click', async () => {
+  const id = pendingDelete;
+  if (!id) return;
+  const btn = document.getElementById('confirm_ok'); btn.disabled = true;
+  try {
+    const r = await getJSON(`/admin/users/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    const n = r.removed || {};
+    const bits = Object.entries(n).filter(([, v]) => v).map(([k, v]) => `${v} ${k}`).join(', ');
+    banner(`${r.message}${bits ? ' (removed ' + bits + ')' : ''}`, 'ok');
+    closeConfirm();
+    await Promise.all([loadUsers(), loadOverview()]);
+  } catch (err) { closeConfirm(); banner(err.message, 'err'); }
+  btn.disabled = false;
+});
+
+// ── CSV export (authenticated download via blob) ───────────────
+document.getElementById('csv_btn').addEventListener('click', async () => {
+  const btn = document.getElementById('csv_btn'); btn.disabled = true;
+  try {
+    const res = await request('/admin/users/export.csv');
+    const blob = await res.blob();
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `users-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  } catch (err) { banner(err.message, 'err'); }
+  btn.disabled = false;
+});
+
+// ── JSON dataset export (authenticated download via blob) ──────
+document.getElementById('dataset_btn').addEventListener('click', async () => {
+  const btn = document.getElementById('dataset_btn'); btn.disabled = true;
+  try {
+    const res = await request('/admin/export/all-sessions');
+    const blob = await res.blob();
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `all_sessions-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  } catch (err) { banner(err.message, 'err'); }
+  btn.disabled = false;
+});
+
+// ── bulk student registration via .xlsx/.csv upload ─────────────
+document.getElementById('bulk_upload_btn').addEventListener('click', () => {
+  document.getElementById('bulk_upload_input').click();
+});
+document.getElementById('bulk_upload_input').addEventListener('change', async (ev) => {
+  const file = ev.target.files[0];
+  ev.target.value = '';   // allow re-selecting the same file later
+  if (!file) return;
+  const btn = document.getElementById('bulk_upload_btn'); btn.disabled = true;
+  try {
+    const form = new FormData();
+    form.append('file', file);
+    const data = await getJSON('/admin/bulk-insert-students/upload', { method: 'POST', body: form });
+    banner(`Uploaded "${file.name}": ${data.inserted} added, ${data.skipped} skipped (of ${data.total_rows} rows). Default password: user@1234`, 'ok');
+    await Promise.all([loadUsers(), loadOverview()]);
+  } catch (err) { banner(err.message, 'err'); }
+  btn.disabled = false;
+});
+
+// ── reset session data (two confirmations + typed phrase) ──────
+const r1 = document.getElementById('reset1'), r2 = document.getElementById('reset2');
+const phrase = document.getElementById('reset_phrase'), go = document.getElementById('reset2_go');
+function closeReset() { r1.classList.add('hidden'); r2.classList.add('hidden'); phrase.value = ''; go.disabled = true; }
+
+document.getElementById('reset_btn').addEventListener('click', async () => {
+  try {
+    const s = await getJSON('/admin/db-stats');
+    document.getElementById('r1_sessions').textContent = `(${s.total_sessions})`;
+    document.getElementById('r1_snaps').textContent = `(${s.code_snapshots})`;
+  } catch (e) {}
+  r1.classList.remove('hidden');
+});
+document.getElementById('reset1_cancel').addEventListener('click', closeReset);
+document.getElementById('reset2_cancel').addEventListener('click', closeReset);
+document.getElementById('reset1_next').addEventListener('click', () => {
+  r1.classList.add('hidden'); r2.classList.remove('hidden'); phrase.focus();
+});
+phrase.addEventListener('input', () => { go.disabled = phrase.value !== 'RESET'; });
+document.getElementById('reset2_form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  if (phrase.value !== 'RESET') return;
+  go.disabled = true;
+  try {
+    const r = await getJSON('/admin/reset-database', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ confirm: 'RESET' }),
+    });
+    const n = r.removed || {};
+    banner(`${r.message} Removed ${n.sessions || 0} sessions, ${n.code_snapshots || 0} snapshots, ${n.events || 0} events, ${n.heartbeats || 0} heartbeats.`, 'ok');
+    closeReset();
+    await Promise.all([loadUsers(), loadOverview()]);
+  } catch (err) { closeReset(); banner(err.message, 'err'); }
+});
+
+// ── boot ───────────────────────────────────────────────────────
+if (token && role === 'admin') {
+  loadTeacherCode();
+  setInterval(() => { if (!document.hidden) loadOverview(); }, 30000);
+  Promise.allSettled([loadOverview(), loadUsers()]).then(rs => {
+    const f = rs.find(r => r.status === 'rejected');
+    if (f) banner(f.reason.message, 'err');
+  });
+}
 </script>
+<script src="/assets/ewu.js"></script>
 </body>
 </html>

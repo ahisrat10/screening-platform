@@ -16,6 +16,7 @@ from sqlalchemy import func as sqlfunc
 from app.database import SessionLocal
 from app.models import CodeSnapshot
 from app.ml.model_loader import call_hf_inference_api, UNIXCODER_HF_REPO
+from app.ml.droid_detector import droid_ai_probability
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +55,9 @@ def _run_periodic_analysis():
             if not snap.code or len(snap.code.strip()) < 10:
                 continue
             try:
-                prob = call_hf_inference_api(UNIXCODER_HF_REPO, snap.code)
+                prob = droid_ai_probability(snap.code)  # None unless DROID_MODEL_DIR is set
+                if prob is None:
+                    prob = call_hf_inference_api(UNIXCODER_HF_REPO, snap.code)
                 snap.ai_score = int(round(prob * 100))
                 snap.ai_score_updated_at = datetime.now(timezone.utc)
                 db.add(snap)
@@ -92,6 +95,15 @@ def start_scheduler():
         id="periodic_ai_analysis",
         replace_existing=True,
         next_run_time=datetime.now(timezone.utc) + timedelta(seconds=30),
+    )
+    from app.rooms import purge_expired_datasets
+    _scheduler.add_job(
+        purge_expired_datasets,
+        trigger="interval",
+        hours=6,
+        id="purge_expired_datasets",
+        replace_existing=True,
+        next_run_time=datetime.now(timezone.utc) + timedelta(minutes=2),
     )
     _scheduler.start()
     logger.info(

@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Register — Screening Platform</title>
 <script src="https://cdn.tailwindcss.com"></script>
+<link rel="icon" href="/assets/ewu-logo.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/assets/ewu.css">
 <style>
   .seg-btn { transition: background-color .15s, color .15s, box-shadow .15s; }
   .seg-btn[aria-pressed="true"] { background: #2563eb; color: #fff; box-shadow: 0 1px 8px rgba(37,99,235,.45); }
@@ -12,7 +14,7 @@
   .seg-btn[aria-pressed="false"]:hover { color: #fff; }
 </style>
 </head>
-<body class="bg-gray-950 min-h-screen flex items-center justify-center p-4">
+<body class="ewu-auth bg-gray-950 min-h-screen flex items-center justify-center p-4">
 <div class="w-full max-w-md py-6">
 
   <div class="text-center mb-7">
@@ -33,9 +35,16 @@
 
     <form id="reg_form" class="space-y-4" novalidate>
 
+      <div id="code_wrap" class="hidden">
+        <label for="teacher_code" class="text-gray-300 text-sm font-medium block mb-1">Teacher code</label>
+        <input id="teacher_code" type="text" placeholder="Code given by the admin" autocomplete="off"
+          class="w-full bg-gray-800 text-white border border-gray-700 rounded-lg px-4 py-3
+                 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"/>
+      </div>
+
       <div id="sid_wrap">
         <label for="student_id" class="text-gray-300 text-sm font-medium block mb-1">Student ID</label>
-        <input id="student_id" type="text" placeholder="e.g. 2023-2-60-148" autocomplete="username"
+        <input id="student_id" type="text" placeholder="Enter your university ID" autocomplete="username"
           class="w-full bg-gray-800 text-white border border-gray-700 rounded-lg px-4 py-3
                  focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"/>
         <p class="text-gray-500 text-xs mt-1">Format: YYYY-S-DD-RRR</p>
@@ -50,7 +59,7 @@
 
       <div>
         <label for="email" class="text-gray-300 text-sm font-medium block mb-1">Email address</label>
-        <input id="email" type="email" placeholder="your@email.com" autocomplete="email"
+        <input id="email" type="email" placeholder="Enter your university mail" autocomplete="email"
           class="w-full bg-gray-800 text-white border border-gray-700 rounded-lg px-4 py-3
                  focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"/>
       </div>
@@ -58,7 +67,7 @@
       <div>
         <label for="password" class="text-gray-300 text-sm font-medium block mb-1">Password</label>
         <div class="relative">
-          <input id="password" type="password" placeholder="Min 8 chars, 1 uppercase, 1 number" autocomplete="new-password"
+          <input id="password" type="password" placeholder="Enter your university portal password (min 8 chars, 1 uppercase, 1 number)" autocomplete="new-password"
             class="w-full bg-gray-800 text-white border border-gray-700 rounded-lg pl-4 pr-12 py-3
                    focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"/>
           <button type="button" data-eye="password" aria-label="Show password" aria-pressed="false"
@@ -92,7 +101,7 @@
 </div>
 
 <script>
-const API = 'https://screening-platform-tpku.onrender.com';
+const API = location.origin;
 let role = 'student';
 
 const EYE_ON  = '<svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M2.04 12.32a1 1 0 0 1 0-.64C3.42 7.5 7.36 4.5 12 4.5s8.58 3 9.96 7.18a1 1 0 0 1 0 .64C20.58 16.5 16.64 19.5 12 19.5s-8.58-3-9.96-7.18Z"/><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"/></svg>';
@@ -118,6 +127,7 @@ function setRole(r) {
   document.getElementById('seg_teacher').setAttribute('aria-pressed', r === 'teacher');
   document.getElementById('title').textContent = r === 'student' ? 'Create student account' : 'Create teacher account';
   document.getElementById('sid_wrap').classList.toggle('hidden', r === 'teacher');
+  document.getElementById('code_wrap').classList.toggle('hidden', r !== 'teacher');
   hideMessage();
 }
 
@@ -141,6 +151,10 @@ async function register() {
 
   const body = { role, full_name, email, password, confirm_password };
   if (role === 'student') body.student_id = student_id;
+  if (role === 'teacher') {
+    body.teacher_code = document.getElementById('teacher_code').value.trim();
+    if (!body.teacher_code) { showMessage('Enter the teacher code from the admin', 'error'); return; }
+  }
 
   const btn = document.getElementById('submit_btn');
   btn.disabled = true;
@@ -156,7 +170,7 @@ async function register() {
     if (res.ok) {
       showMessage('✅ ' + data.message + ' Redirecting to sign in…', 'success');
       try { localStorage.setItem('login_role', role); } catch (e) {}   // pre-select the right toggle on the login page
-      setTimeout(() => window.location.href = '/', role === 'teacher' ? 3500 : 2000);
+      setTimeout(() => window.location.href = role === 'teacher' ? '/teacher/login' : '/student/login', role === 'teacher' ? 3500 : 2000);
       return;
     }
     showMessage('❌ ' + errorMessage(data, 'Registration failed'), 'error');
@@ -188,6 +202,8 @@ function showMessage(msg, type) {
     (type === 'error' ? 'bg-red-900/70 text-red-200' : type === 'success' ? 'bg-green-900/70 text-green-200' : 'bg-blue-900/70 text-blue-200');
 }
 function hideMessage() { document.getElementById('message').className = 'hidden'; }
+</script>
+<script src="/assets/ewu.js">if (new URLSearchParams(location.search).get('role') === 'teacher') setRole('teacher');
 </script>
 </body>
 </html>

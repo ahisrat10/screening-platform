@@ -20,3 +20,6 @@ Thumbs.db
 # Large model checkpoints (too big for GitHub)
 app/ml/models/codebert/
 app/ml/models/unixcoder/
+
+# local review server DB
+tools/dev.db

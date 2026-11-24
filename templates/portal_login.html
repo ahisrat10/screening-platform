@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en" data-role="{{ROLE}}">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sign in — EWU Screening Platform</title>
+<link rel="icon" href="/assets/ewu-logo.svg" type="image/svg+xml">
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="stylesheet" href="/assets/ewu.css">
+</head>
+<body class="ewu-auth min-h-screen flex items-center justify-center p-4">
+
+<div class="relative z-10 w-full max-w-md ewu-stage">
+  <div class="text-center mb-7">
+    <a href="/"><img src="/assets/ewu-logo.svg" alt="East West University" class="ewu-logo mx-auto" style="height:66px;padding:8px 14px;border-radius:16px"></a>
+    <h1 id="title" class="text-3xl font-bold text-white mt-5"></h1>
+    <p id="sub" class="text-blue-200/70 text-sm mt-1"></p>
+  </div>
+
+  <div class="ewu-card">
+    <div id="message" class="hidden mb-4 p-3 rounded-lg text-sm font-medium" role="alert"></div>
+
+    <form id="login_form" class="space-y-4 relative z-10" novalidate>
+      <div>
+        <label for="student_id" id="id_label" class="text-blue-100 text-sm font-medium block mb-1"></label>
+        <input id="student_id" type="text" autocomplete="username" autofocus class="w-full text-white px-4 py-3"/>
+      </div>
+      <div>
+        <label for="password" class="text-blue-100 text-sm font-medium block mb-1">Password</label>
+        <div class="relative">
+          <input id="password" type="password" autocomplete="current-password" placeholder="Use your university portal password" class="w-full text-white pl-4 pr-16 py-3"/>
+          <button type="button" id="eye" aria-pressed="false" class="absolute inset-y-0 right-0 px-3 text-xs text-blue-200 hover:text-white" style="background:none!important;box-shadow:none!important">Show</button>
+        </div>
+      </div>
+      <div class="text-right"><a href="/forgot" class="text-orange-300 text-sm hover:underline">Forgot password?</a></div>
+      <button id="submit_btn" type="submit" class="w-full bg-blue-600 disabled:opacity-60 text-white font-semibold py-3 rounded-xl">Sign in</button>
+    </form>
+
+    <p id="alt" class="text-center text-blue-200/60 text-sm mt-6 relative z-10"></p>
+  </div>
+
+  <p class="text-center text-sm mt-6"><a href="/" class="text-blue-200/60 hover:text-white">← All portals</a></p>
+</div>
+
+<script>
+const API  = location.origin;
+const ROLE = document.documentElement.dataset.role;     // student | teacher | admin
+const HOME = { student: '/student', teacher: '/teacher', admin: '/admin' };
+
+const TEXT = {
+  student: { title: 'Student sign in', sub: 'See your classes, code and feedback', label: 'University email',   ph: 'Use your university mail',
+             alt: 'Not registered yet? <a class="text-orange-300 hover:underline" href="/register">Create an account</a>' },
+  teacher: { title: 'Teacher sign in', sub: 'Rooms, labs and datasets',            label: 'University email', ph: 'Use your university mail',
+             alt: 'New teacher? You need the code from the admin. <a class="text-orange-300 hover:underline" href="/register?role=teacher">Create teacher account</a>' },
+  admin:   { title: 'Admin sign in',   sub: 'Totals, datasets and teacher code',    label: 'University email', ph: 'Use your university mail', alt: '' },
+};
+const T = TEXT[ROLE] || TEXT.student;
+document.getElementById('title').textContent = T.title;
+document.getElementById('sub').textContent = T.sub;
+document.getElementById('id_label').textContent = T.label;
+document.getElementById('student_id').placeholder = T.ph;
+document.getElementById('alt').innerHTML = T.alt;
+document.title = T.title + ' — EWU Screening Platform';
+
+// Already signed in to this portal? go straight in.
+if (localStorage.getItem('token') && localStorage.getItem('role') === ROLE) location.replace(HOME[ROLE]);
+
+document.getElementById('eye').addEventListener('click', () => {
+  const i = document.getElementById('password'), show = i.type === 'password';
+  i.type = show ? 'text' : 'password';
+  document.getElementById('eye').textContent = show ? 'Hide' : 'Show';
+});
+document.getElementById('login_form').addEventListener('submit', (e) => { e.preventDefault(); login(); });
+
+async function login() {
+  const student_id = document.getElementById('student_id').value.trim();
+  const password   = document.getElementById('password').value;
+  if (!student_id || !password) { showMessage('Please fill in all fields', 'error'); return; }
+  const btn = document.getElementById('submit_btn');
+  btn.disabled = true;
+  try {
+    showMessage('Signing in…', 'info');
+    const res = await fetch(`${API}/auth/login`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ student_id, password, role: ROLE })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok) {
+      if (data.role !== ROLE) { showMessage(`❌ This is the ${ROLE} portal. Use the ${data.role} portal for this account.`, 'error'); btn.disabled = false; return; }
+      localStorage.setItem('token',      data.access_token);
+      localStorage.setItem('student_id', data.student_id);
+      localStorage.setItem('full_name',  data.full_name);
+      localStorage.setItem('role',       data.role);
+      showMessage('✅ Signed in! Opening your portal…', 'success');
+      setTimeout(() => { location.href = HOME[ROLE]; }, 600);
+      return;
+    }
+    showMessage('❌ ' + errorMessage(data, 'Login failed'), 'error');
+  } catch (err) {
+    showMessage('❌ Cannot connect to server!', 'error');
+  }
+  btn.disabled = false;
+}
+
+function errorMessage(error, fallback) {
+  const d = error && error.detail;
+  if (typeof d === 'string' && d) return d;
+  if (Array.isArray(d) && d.length) return d.map(e => (e && e.msg) ? String(e.msg).replace(/^Value error, /, '') : JSON.stringify(e)).join('; ');
+  if (d && typeof d === 'object') return d.msg || d.message || JSON.stringify(d);
+  return fallback;
+}
+function showMessage(msg, type) {
+  const el = document.getElementById('message');
+  el.textContent = msg;
+  el.className = 'relative z-10 mb-4 p-3 rounded-lg text-sm font-medium ' +
+    (type === 'error' ? 'bg-red-900/70 text-red-200' : type === 'success' ? 'bg-green-900/70 text-green-200' : 'bg-blue-900/70 text-blue-200');
+}
+</script>
+<script src="/assets/ewu.js"></script>
+</body>
+</html>
