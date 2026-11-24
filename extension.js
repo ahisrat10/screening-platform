@@ -1,9 +1,15 @@
 const vscode = require('vscode');
 const https  = require('https');
+const http   = require('http');
+const path   = require('path');
+const crypto = require('crypto');
+const { spawn } = require('child_process');
 
 // ══════════════════════════════════════════════════════════════
 // CODE MONITOR v4.0 — AUTOMATED TECHNICAL SCREENING PLATFORM
 // ══════════════════════════════════════════════════════════════
+
+const DEFAULT_SERVER_URL = 'https://screening-platform-tpku.onrender.com';
 
 const CONFIG = {
     SERVER_HOST:               'screening-platform-tpku.onrender.com',
@@ -12,7 +18,23 @@ const CONFIG = {
     HEARTBEAT_INTERVAL_MS:     60000,   // Heartbeat every 60 seconds
     LAB_STATUS_INTERVAL_MS:    30000,   // Ask the server if a lab is running
     IDLE_TIMEOUT_MS:           60000,   // 60 seconds no typing = idle
-    PASTE_CHAR_THRESHOLD:      50,      // 50+ chars at once = paste (~1 meaningful line; 10 was too sensitive to normal typing)
+    PASTE_CHAR_THRESHOLD:      20,      // candidate paste size; a candidate only counts if it equals the clipboard (so typing/autocomplete never triggers)
+    EXTERNAL_GRACE_MS:         10000,   // leaving VS Code for < 10s costs nothing
+    EXTERNAL_VISIT_POINTS:     8,       // flat cost of one visit to a forbidden app (after grace)
+    EXTERNAL_VISIT_MAX_EXTRA:  8,       // + up to 8 more for long visits (2 per 30s)
+    EXTERNAL_PASTE_POINTS:     20,      // pasting text copied from outside VS Code (once per copy)
+    INTERNAL_PASTE_POINTS:     1,       // text copied inside VS Code
+    SCORE_DECAY_INTERVAL_MS:   60000,   // clean minute: score drops
+    SCORE_DECAY_POINTS:        2,
+    DECAY_QUIET_MS:            120000,  // ...only if no forbidden-app visit in the last 2 min
+    FORBIDDEN_APPS: [
+        'chrome', 'msedge', 'firefox', 'brave', 'opera', 'vivaldi', 'iexplore',
+        'outlook', 'olk', 'hxoutlook', 'thunderbird', 'mailbird',
+        'notepad', 'notepad++', 'wordpad', 'winword', 'powerpnt', 'excel', 'onenote',
+        'acrord32', 'acrobat', 'foxitreader', 'sumatrapdf',
+        'codeblocks',
+    ],
+    VSCODE_PROCESS_NAMES: ['code', 'code - insiders', 'codium', 'vscodium', 'cursor'],
     RAPID_TAB_COUNT:           3,       // 3 switches = suspicious
     RAPID_TAB_WINDOW_MS:       30000,   // within 30 seconds
     AI_WATCHING_SPEED:         8,       // chars/sec = fast typing
@@ -33,11 +55,41 @@ const CONFIG = {
     EVENT_BATCH_INTERVAL_MS:   120000,  // low-priority behavioral events: flush queue every 2 min
 };
 
+// The backend address comes from the "codeMonitor.serverUrl" setting
+// (default: the hosted server). Use http://127.0.0.1:8000 to test locally.
+let serverIsHttps = true;
+
+function applyServerUrl() {
+    let raw = DEFAULT_SERVER_URL;
+    try {
+        raw = (vscode.workspace.getConfiguration('codeMonitor').get('serverUrl') || DEFAULT_SERVER_URL).trim();
+    } catch (e) { /* settings unavailable: keep the default */ }
+    try {
+        const u = new URL(raw.includes('://') ? raw : 'https://' + raw);
+        if (u.protocol !== 'http:' && u.protocol !== 'https:') throw new Error('bad protocol');
+        serverIsHttps     = u.protocol === 'https:';
+        CONFIG.SERVER_HOST = u.hostname;
+        CONFIG.SERVER_PORT = u.port ? Number(u.port) : (serverIsHttps ? 443 : 80);
+    } catch (e) {
+        vscode.window.showErrorMessage(`Code Monitor: invalid server URL "${raw}". Using the default server.`);
+        const u = new URL(DEFAULT_SERVER_URL);
+        serverIsHttps      = true;
+        CONFIG.SERVER_HOST = u.hostname;
+        CONFIG.SERVER_PORT = 443;
+    }
+}
+
+// Same as https.request / http.request, picked by the configured server.
+function serverRequest(options, callback) {
+    return (serverIsHttps ? https : http).request(options, callback);
+}
+
 // ══════════════════════════════════════════════════════════════
 // GLOBAL STATE — original 16-feature state
 // ══════════════════════════════════════════════════════════════
 let studentId           = null;
 let jwtToken            = null;
+let logoutItem          = null;   // status-bar "Logout" button
 let isConnected         = false;
 let statusBarItem       = null;
 let heartbeatTimer      = null;
@@ -105,6 +157,19 @@ let eventQueue              = [];               // low-priority behavioral event
 let batchTimer              = null;
 
 // ══════════════════════════════════════════════════════════════
+// GLOBAL STATE — external-app helper, clipboard source tracking, decay
+// ══════════════════════════════════════════════════════════════
+let extensionDir          = '';
+let helperProc            = null;               // Windows PowerShell helper (border + foreground app)
+let helperActive          = false;              // true once the helper reported READY
+let externalVisit         = null;               // { app, start } while a forbidden app is in front
+let lastExternalAt        = 0;
+let lastExternalApp       = null;
+let clipHashBeforeBlur    = null;
+let externalClips         = new Map();          // hash -> { app, scored } for text copied outside VS Code
+let decayTimer            = null;
+
+// ══════════════════════════════════════════════════════════════
 // PER-FILE SCORING SESSIONS (Issue 2 — multiple files per student)
 // Each open file gets its own independent scoring session, keyed by
 // filename. Switching files preserves the previous file's score and
@@ -160,19 +225,14 @@ class FileSessionsProvider {
 
         return entries.map(([filename, session]) => {
             const shortName = filename.split(/[\\/]/).pop();
-            const score     = session.latestScore;
-            const scoreText = score === null ? '…' : `${score}%`;
-            const item = new vscode.TreeItem(`${shortName}  —  ${scoreText}`, vscode.TreeItemCollapsibleState.None);
+            // Scores are for the teacher only: the student just sees the file list.
+            const item = new vscode.TreeItem(shortName, vscode.TreeItemCollapsibleState.None);
             item.description = session.language || '';
             item.tooltip = [
                 filename,
-                `AI suspicion: ${scoreText}`,
-                `Snapshots: ${session.snapshotCount}`,
                 session.updatedAt ? `Updated: ${new Date(session.updatedAt).toLocaleTimeString()}` : '',
             ].filter(Boolean).join('\n');
-            item.iconPath = new vscode.ThemeIcon(
-                score === null ? 'file' : score >= 70 ? 'flame' : score >= 40 ? 'warning' : 'check'
-            );
+            item.iconPath = new vscode.ThemeIcon('file');
             return item;
         });
     }
@@ -189,11 +249,21 @@ function refreshFileSessionsView() {
 // ══════════════════════════════════════════════════════════════
 function activate(context) {
     console.log('Code Monitor v4.0 Active!');
+    extensionDir = context.extensionPath;
+    applyServerUrl();
+    context.subscriptions.push(vscode.workspace.onDidChangeConfiguration(e => {
+        if (e.affectsConfiguration('codeMonitor.serverUrl')) applyServerUrl();
+    }));
 
     // Create status bar
     statusBarItem = vscode.window.createStatusBarItem(
         vscode.StatusBarAlignment.Left, 100
     );
+    logoutItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 99);
+    logoutItem.text    = '$(sign-out) Logout';
+    logoutItem.tooltip = 'Log out of Code Monitor';
+    logoutItem.command = 'code-monitor.logout';
+    context.subscriptions.push(logoutItem);
     updateStatusBar('disconnected');
     statusBarItem.show();
     context.subscriptions.push(statusBarItem);
@@ -229,40 +299,11 @@ function activate(context) {
             });
             if (!id) return;
 
-            // Ask login mode: normal or guest
-            const loginMode = await vscode.window.showQuickPick(
-                [
-                    { label: '🔒 Normal Login', description: 'Student ID + Password', value: 'normal' },
-                    { label: '🎓 Guest Login',  description: 'Student ID only (lab mode)', value: 'guest' },
-                ],
-                { placeHolder: 'Select login method', canPickMany: false }
-            );
-            if (!loginMode) return;
-
-            let loginResult;
-            if (loginMode.value === 'guest') {
-                // Guest login — ID only
-                updateStatusBar('loading');
-                vscode.window.showInformationMessage('🔄 Connecting as guest...');
-                loginResult = await callGuestLoginAPI(id.trim());
-            } else {
-                // Normal login — ask password
-                const password = await vscode.window.showInputBox({
-                    prompt:      '🔒 Enter your Exam Password',
-                    placeHolder: 'Enter your password',
-                    password:    true,
-                    validateInput: (val) => {
-                        if (!val || val.trim().length < 3)
-                            return 'Password is too short!';
-                        return null;
-                    }
-                });
-                if (!password) return;
-
-                updateStatusBar('loading');
-                vscode.window.showInformationMessage('🔄 Verifying credentials...');
-                loginResult = await callLoginAPI(id.trim(), password);
-            }
+            // The student ID is the login: the teacher's class list decides who
+            // may sign in, so there is no password and no method to choose.
+            updateStatusBar('loading');
+            vscode.window.showInformationMessage('🔄 Checking your class registration...');
+            const loginResult = await callGuestLoginAPI(id.trim());
 
             if (!loginResult.success) {
                 updateStatusBar('disconnected');
@@ -300,8 +341,12 @@ function activate(context) {
                 }
             });
 
+            const classNames = (loginResult.classes || [])
+                .map(c => c.section ? `${c.course_name} (Section ${c.section})` : c.course_name);
             vscode.window.showInformationMessage(
-                `✅ Connected as: ${studentId} — Exam monitoring ACTIVE.`
+                classNames.length
+                    ? `✅ You are registered in ${classNames.join(', ')}. Monitoring is ACTIVE.`
+                    : `✅ Connected as: ${studentId} — Monitoring ACTIVE.`
             );
 
             startMonitoring();
@@ -320,11 +365,23 @@ function activate(context) {
             }
 
             const confirm = await vscode.window.showWarningMessage(
-                '⚠️ Are you sure you want to disconnect from the exam?',
+                examMode
+                    ? '⚠️ The lab is still running. Your teacher will be notified if you log out now. Log out?'
+                    : '⚠️ Are you sure you want to disconnect from the exam?',
                 'Yes, Logout', 'Cancel'
             );
             if (confirm !== 'Yes, Logout') return;
 
+            if (examMode) {
+                sendToServer('/student/event', {
+                    student_id: studentId,
+                    event_type: 'EARLY_LOGOUT',
+                    severity:   'HIGH',
+                    details:    earlyLogoutDetails('logout'),
+                    timestamp:  new Date().toISOString(),
+                });
+            }
+            sendToServer('/student/event', sessionSummaryPayload());
             flushEventQueue();
 
             sendToServer('/student/disconnect', {
@@ -357,13 +414,9 @@ function activate(context) {
                 );
                 return;
             }
+            // Only the basics: keystroke / paste numbers are for the teacher.
             vscode.window.showInformationMessage(
-                `📊 Student: ${studentId} | ` +
-                `Session: ${getSessionDuration()} | ` +
-                `Keystrokes: ${sessionStats.totalKeystrokes} | ` +
-                `Pastes: ${sessionStats.totalPastes} | ` +
-                `Tab Switches: ${sessionStats.totalTabSwitches} | ` +
-                `⚠️ Score: ${suspiciousScore}/100`
+                `✅ Connected as ${studentId} | Session: ${getSessionDuration()}`
             );
         }
     );
@@ -561,26 +614,17 @@ function activate(context) {
             lastTypingTime = now;
 
             // ── DETECT: Paste ──────────────────────────────────
-            // Threshold: 10 characters at once = paste detected
-            if (totalCharsInEvent >= CONFIG.PASTE_CHAR_THRESHOLD) {
-                sessionStats.totalPastes++;
-                const preview = pastePreview.substring(0, 120);
+            // A candidate is a big insert that is not an undo/redo. It only
+            // counts as a paste if it equals the clipboard, and the score
+            // depends on WHERE the clipboard text came from (see
+            // classifyAndScorePaste).
+            const isUndoRedo = event.reason === vscode.TextDocumentChangeReason.Undo
+                            || event.reason === vscode.TextDocumentChangeReason.Redo;
+            if (totalCharsInEvent >= CONFIG.PASTE_CHAR_THRESHOLD && !isUndoRedo) {
+                const insertedText = event.contentChanges.map(c => c.text).join('').slice(0, 20000);
 
-                sessionStats.suspiciousEvents.push({
-                    type:      'PASTE_DETECTED',
-                    chars:     totalCharsInEvent,
-                    timestamp: new Date().toISOString(),
-                });
-
-                // ── Copy From Same File ─────────────────────────
-                // Reconstruct the document text as it was BEFORE this paste
-                // was applied, then check whether the exact pasted text
-                // already existed there. Only exact for a single contiguous
-                // edit (the normal paste case); for the rare multi-part
-                // paste VS Code sometimes splits into several contentChanges,
-                // fall back to the post-edit document (a block pasted from
-                // elsewhere in THIS file still duplicates text outside the
-                // newly inserted range either way).
+                // Copy-from-same-file: rebuild the text as it was before the
+                // edit and see if the pasted text already existed there.
                 const fullText = event.document.getText();
                 let preEditText = fullText;
                 if (event.contentChanges.length === 1) {
@@ -588,37 +632,11 @@ function activate(context) {
                     preEditText = fullText.slice(0, change.rangeOffset)
                         + fullText.slice(change.rangeOffset + change.text.length);
                 }
-                const pastedText = pastePreview.trim();
+                const pastedText = insertedText.trim();
                 const isCopyFromSameFile = pastedText.length > 5 && preEditText.includes(pastedText);
-                if (isCopyFromSameFile) {
-                    copyFromSameFileCount++;
-                }
+                if (isCopyFromSameFile) copyFromSameFileCount++;
 
-                // Same-file paste (refactor/move within this document) is
-                // far less suspicious than pasting content that didn't
-                // already exist here (e.g. from a browser or another app).
-                addSuspiciousScore(
-                    isCopyFromSameFile ? 2 : 15,
-                    isCopyFromSameFile ? 'Same-file paste detected' : 'Paste detected'
-                );
-
-                sendToServer('/student/event', {
-                    student_id: studentId,
-                    event_type: 'PASTE_DETECTED',
-                    severity:   'HIGH',
-                    details: {
-                        chars_pasted:         totalCharsInEvent,
-                        paste_preview:        preview,
-                        total_pastes:         sessionStats.totalPastes,
-                        suspicious_score:     suspiciousScore,
-                        copy_from_same_file:  isCopyFromSameFile,
-                    },
-                    timestamp: new Date().toISOString(),
-                });
-
-                vscode.window.showWarningMessage(
-                    `⚠️ Paste detected (${totalCharsInEvent} chars) — Admin notified!`
-                );
+                classifyAndScorePaste(insertedText, totalCharsInEvent, pastePreview.substring(0, 120), isCopyFromSameFile);
             }
 
             // ── DETECT: Fast burst typing (AI watching) ────────
@@ -739,6 +757,7 @@ function activate(context) {
                 // Student LEFT VS Code
                 isWindowFocused = false;
                 windowBlurTime  = now;
+                readClipboardHash().then(h => { clipHashBeforeBlur = h; });
                 tabSwitchTimestamps.push(now);
                 sessionStats.totalTabSwitches++;
 
@@ -746,25 +765,30 @@ function activate(context) {
                     t => now - t < CONFIG.RAPID_TAB_WINDOW_MS
                 );
 
-                // DETECT: Rapid Tab Switching
+                // DETECT: Rapid Tab Switching.
+                // With the helper running, only forbidden apps cost points
+                // (see finishExternalVisit), so leaving VS Code for Explorer,
+                // a calculator etc. is free. Without it, fall back to the
+                // old blur-based rule with smaller points.
                 if (tabSwitchTimestamps.length >= CONFIG.RAPID_TAB_COUNT) {
-                    addSuspiciousScore(20, 'Rapid tab switching');
+                    if (!helperActive) addSuspiciousScore(10, 'Rapid tab switching');
 
                     sendToServer('/student/event', {
                         student_id: studentId,
                         event_type: 'RAPID_TAB_SWITCHING',
-                        severity:   'HIGH',
+                        // With the helper running, switching windows is not
+                        // penalised (only forbidden apps are), so don't flag it HIGH.
+                        severity:   helperActive ? 'LOW' : 'HIGH',
                         details: {
                             switches_in_window: tabSwitchTimestamps.length,
                             total_switches:     sessionStats.totalTabSwitches,
-                            message:            'Rapid tab switching — highly suspicious!',
+                            message:            helperActive
+                                ? 'Switched windows several times quickly (not scored)'
+                                : 'Rapid tab switching — highly suspicious!',
                         },
                         timestamp: new Date().toISOString(),
                     });
 
-                    vscode.window.showErrorMessage(
-                        '🚨 Rapid tab switching detected! Admin has been notified.'
-                    );
                 } else {
                     // Single tab switch
                     queueBehavioralEvent('WINDOW_UNFOCUSED', 'LOW', {
@@ -786,9 +810,11 @@ function activate(context) {
                     message:               `Student returned after ${awaySecs}s`,
                 });
 
+                checkClipboardAfterReturn();
+
                 // DETECT: Long Absence
                 if (awayMs > CONFIG.LONG_ABSENCE_THRESHOLD_MS) {
-                    addSuspiciousScore(10, `Long absence: ${awaySecs}s`);
+                    if (!helperActive) addSuspiciousScore(5, `Long absence: ${awaySecs}s`);
 
                     sendToServer('/student/event', {
                         student_id: studentId,
@@ -855,8 +881,11 @@ function startMonitoring() {
     freezeTimer    = setInterval(checkScreenFreeze, CONFIG.FREEZE_CHECK_INTERVAL_MS);
     labTimer       = setInterval(pollLabStatus, CONFIG.LAB_STATUS_INTERVAL_MS);
     batchTimer     = setInterval(flushEventQueue, CONFIG.EVENT_BATCH_INTERVAL_MS);
+    decayTimer     = setInterval(decayScore, CONFIG.SCORE_DECAY_INTERVAL_MS);
     pollLabStatus();   // don't wait 30s to learn a lab is already running
     resetIdleTimer();
+    startHelper();
+    readClipboardHash().then(h => { clipHashBeforeBlur = h; });
 }
 
 function stopMonitoring() {
@@ -865,10 +894,185 @@ function stopMonitoring() {
     clearInterval(freezeTimer);
     clearInterval(labTimer);
     clearInterval(batchTimer);
+    clearInterval(decayTimer);
     clearTimeout(idleTimer);
-    heartbeatTimer = kpmTimer = freezeTimer = idleTimer = labTimer = batchTimer = null;
+    clearTimeout(scoreSyncTimer); scoreSyncTimer = null;
+    heartbeatTimer = kpmTimer = freezeTimer = idleTimer = labTimer = batchTimer = decayTimer = null;
     examMode  = false;
     activeLab = null;
+    stopHelper();
+    externalClips.clear();
+    externalVisit = null;
+}
+
+// ══════════════════════════════════════════════════════════════
+// EXTERNAL-APP HELPER (Windows only)
+// A PowerShell process draws the orange/red screen border and reports
+// which app is in front. Only the process NAME is reported (no titles).
+// If it can't run (non-Windows, spawn failure) the extension falls back
+// to VS Code window-blur detection with a grace period.
+// ══════════════════════════════════════════════════════════════
+function startHelper() {
+    if (helperProc || process.platform !== 'win32' || !extensionDir) return;
+    const script = path.join(extensionDir, 'helper', 'monitor-helper.ps1');
+    try {
+        helperProc = spawn('powershell.exe', [
+            '-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden',
+            '-File', script,
+            '-ParentPid', String(process.pid),
+            '-Forbidden', CONFIG.FORBIDDEN_APPS.join(','),
+        ], { windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] });
+    } catch (e) {
+        helperProc = null;
+        return;
+    }
+    let buf = '';
+    helperProc.stdout.on('data', (chunk) => {
+        buf += chunk.toString();
+        let i;
+        while ((i = buf.indexOf('\n')) >= 0) {
+            const line = buf.slice(0, i).trim();
+            buf = buf.slice(i + 1);
+            if (line === 'READY') helperActive = true;
+            else if (line.startsWith('APP:')) onForegroundApp(line.slice(4));
+        }
+    });
+    helperProc.on('error', () => { helperProc = null; helperActive = false; });
+    helperProc.on('exit',  () => { helperProc = null; helperActive = false; });
+}
+
+function stopHelper() {
+    if (helperProc) {
+        try { helperProc.kill(); } catch (e) { /* already gone */ }
+    }
+    helperProc = null;
+    helperActive = false;
+}
+
+function onForegroundApp(name) {
+    if (!isConnected) return;
+    const app = String(name || '').toLowerCase();
+    if (CONFIG.VSCODE_PROCESS_NAMES.includes(app)) {
+        finishExternalVisit();
+    } else if (CONFIG.FORBIDDEN_APPS.includes(app) && !externalVisit) {
+        externalVisit = { app, start: Date.now() };
+        lastExternalApp = app;
+    }
+}
+
+// Student came back from a forbidden app. Short trips are free; longer ones
+// cost a small flat amount (not per second), so one visit can't drain the score.
+function finishExternalVisit() {
+    if (!externalVisit) return;
+    const { app, start } = externalVisit;
+    externalVisit  = null;
+    lastExternalAt = Date.now();
+    const durMs = lastExternalAt - start;
+    if (durMs < CONFIG.EXTERNAL_GRACE_MS) {
+        queueBehavioralEvent('EXTERNAL_APP_BRIEF', 'LOW', { app, seconds: Math.round(durMs / 1000) });
+        return;
+    }
+    const extra  = Math.min(CONFIG.EXTERNAL_VISIT_MAX_EXTRA, Math.floor(durMs / 30000) * 2);
+    const points = CONFIG.EXTERNAL_VISIT_POINTS + extra;
+    addSuspiciousScore(points, `Used ${app} for ${Math.round(durMs / 1000)}s`);
+    sendToServer('/student/event', {
+        student_id: studentId,
+        event_type: 'EXTERNAL_APP_USED',
+        severity:   'HIGH',
+        details: {
+            app,
+            away_duration_seconds: Math.round(durMs / 1000),
+            points,
+            message: `Student used ${app} during the lab`,
+        },
+        timestamp: new Date().toISOString(),
+    });
+}
+
+// ══════════════════════════════════════════════════════════════
+// CLIPBOARD SOURCE TRACKING
+// On every window blur we remember the clipboard; on return, if it changed,
+// the new text was copied OUTSIDE VS Code. Pasting that text later is a
+// real external paste (scored once per copy). Text copied inside VS Code
+// (another file, undo/redo, moving code around) is almost free.
+// ══════════════════════════════════════════════════════════════
+function normText(t) {
+    return String(t || '').replace(/\r\n/g, '\n').trim();
+}
+function hashText(t) {
+    return crypto.createHash('sha1').update(normText(t)).digest('hex');
+}
+async function readClipboardHash() {
+    try {
+        const t = await vscode.env.clipboard.readText();
+        return t ? hashText(t) : null;
+    } catch (e) { return null; }
+}
+async function checkClipboardAfterReturn() {
+    let text = '';
+    try { text = await vscode.env.clipboard.readText(); } catch (e) { return; }
+    if (!text || normText(text).length === 0) return;
+    const h = hashText(text);
+    if (h === clipHashBeforeBlur) return;           // clipboard unchanged while away
+    const app = (externalVisit && externalVisit.app) || lastExternalApp || 'external';
+    externalClips.set(h, { app, scored: false });   // a new copy re-arms the same text
+    if (externalClips.size > 200) externalClips.delete(externalClips.keys().next().value);
+    clipHashBeforeBlur = h;
+}
+
+async function classifyAndScorePaste(text, chars, preview, sameFile) {
+    let clip = '';
+    try { clip = await vscode.env.clipboard.readText(); } catch (e) { return; }
+    // Inserted text that is not what's on the clipboard = autocomplete,
+    // snippet, formatter, etc. Not a paste.
+    if (normText(clip) !== normText(text)) return;
+
+    const ext = externalClips.get(hashText(text));
+    let source = 'internal';
+    let points = sameFile ? 0 : CONFIG.INTERNAL_PASTE_POINTS;
+    if (ext) {
+        if (!ext.scored) {
+            ext.scored = true;
+            source = 'external';
+            points = CONFIG.EXTERNAL_PASTE_POINTS;
+        } else {
+            source = 'external-repeat';             // same copy pasted again: no new cost
+            points = 0;
+        }
+    }
+
+    sessionStats.totalPastes++;
+    sessionStats.suspiciousEvents.push({
+        type: 'PASTE_DETECTED', chars, source, timestamp: new Date().toISOString(),
+    });
+    if (points > 0) addSuspiciousScore(points, source === 'external' ? `Paste from ${ext.app}` : 'Paste detected');
+
+    sendToServer('/student/event', {
+        student_id: studentId,
+        event_type: 'PASTE_DETECTED',
+        severity:   source === 'external' ? 'HIGH' : 'LOW',
+        details: {
+            chars_pasted:        chars,
+            paste_preview:       preview,
+            total_pastes:        sessionStats.totalPastes,
+            suspicious_score:    suspiciousScore,
+            copy_from_same_file: sameFile,
+            paste_source:        source,
+            source_app:          ext ? ext.app : null,
+        },
+        timestamp: new Date().toISOString(),
+    });
+    // No pop-up: the student is not told what was detected; the teacher sees
+    // the event and the score on the dashboard.
+}
+
+// A clean stretch slowly earns score back, so one mistake can't use up the
+// whole budget. Paused for 2 minutes after any forbidden-app visit.
+function decayScore() {
+    if (!isConnected || suspiciousScore <= 0) return;
+    if (externalVisit || Date.now() - lastExternalAt < CONFIG.DECAY_QUIET_MS) return;
+    suspiciousScore = Math.max(0, suspiciousScore - CONFIG.SCORE_DECAY_POINTS);
+    updateStatusBar(isWindowFocused ? 'connected' : 'suspicious');
 }
 
 function resetBehavioralState() {
@@ -905,7 +1109,7 @@ function resetBehavioralState() {
 // ══════════════════════════════════════════════════════════════
 function callGuestLoginAPI(sid) {
     return new Promise((resolve) => {
-        const body    = JSON.stringify({ student_id: sid });
+        const body    = JSON.stringify({ student_id: sid, client: 'extension' });
         const options = {
             hostname: CONFIG.SERVER_HOST,
             port:     CONFIG.SERVER_PORT,
@@ -917,14 +1121,14 @@ function callGuestLoginAPI(sid) {
             },
         };
 
-        const req = https.request(options, (res) => {
+        const req = serverRequest(options, (res) => {
             let data = '';
             res.on('data', chunk => data += chunk);
             res.on('end', () => {
                 try {
                     const parsed = JSON.parse(data);
                     if (res.statusCode === 200) {
-                        resolve({ success: true, token: parsed.access_token, name: parsed.full_name });
+                        resolve({ success: true, token: parsed.access_token, name: parsed.full_name, classes: parsed.classes || [] });
                     } else {
                         resolve({ success: false, message: parsed.detail || 'Guest login failed' });
                     }
@@ -945,7 +1149,7 @@ function callGuestLoginAPI(sid) {
 
 function callLoginAPI(sid, password) {
     return new Promise((resolve) => {
-        const body    = JSON.stringify({ student_id: sid, password: password });
+        const body    = JSON.stringify({ student_id: sid, password: password, client: 'extension' });
         const options = {
             hostname: CONFIG.SERVER_HOST,
             port:     CONFIG.SERVER_PORT,
@@ -957,7 +1161,7 @@ function callLoginAPI(sid, password) {
             },
         };
 
-        const req = https.request(options, (res) => {
+        const req = serverRequest(options, (res) => {
             let data = '';
             res.on('data', chunk => data += chunk);
             res.on('end', () => {
@@ -968,6 +1172,7 @@ function callLoginAPI(sid, password) {
                             success: true,
                             token:   parsed.access_token,
                             name:    parsed.full_name,
+                            classes: parsed.classes || [],
                         });
                     } else {
                         resolve({
@@ -1271,7 +1476,7 @@ function getFromServer(endpoint) {
         const headers = {};
         if (jwtToken) headers['Authorization'] = `Bearer ${jwtToken}`;
 
-        const req = https.request({
+        const req = serverRequest({
             hostname: CONFIG.SERVER_HOST,
             port:     CONFIG.SERVER_PORT,
             path:     endpoint,
@@ -1312,12 +1517,44 @@ function enableExamMode(lab) {
     });
 }
 
+// Totals for the teacher's dataset. VS Code does not tell an extension which
+// individual keys were pressed, so this is counts of actions only: typing,
+// pastes, undo/redo, tab switches.
+function sessionSummaryPayload() {
+    return {
+        student_id: studentId,
+        event_type: 'SESSION_SUMMARY',
+        severity:   'INFO',
+        details: {
+            keystrokes:    sessionStats.totalKeystrokes,
+            pastes:        sessionStats.totalPastes,
+            undo:          undoCount,
+            redo:          redoCount,
+            tab_switches:  sessionStats.totalTabSwitches,
+            idle_events:   sessionStats.totalIdleEvents,
+            snapshots:     sessionStats.codeSnapshots,
+            session_start: sessionStats.sessionStart,
+            suspicious_score: suspiciousScore,
+        },
+        timestamp: new Date().toISOString(),
+    };
+}
+
+// Tell the teacher that a student is leaving while the lab is still running.
+function earlyLogoutDetails(reason) {
+    return {
+        reason:      reason,
+        lab_id:      activeLab ? activeLab.id : null,
+        course_name: activeLab ? (activeLab.course_name || null) : null,
+        message:     reason === 'closed' ? 'Student closed VS Code before the lab ended'
+                                         : 'Student logged out before the lab ended',
+    };
+}
+
 function disableExamMode() {
     const lab = activeLab;
     examMode  = false;
     activeLab = null;
-    refreshStatusBar();
-    vscode.window.showInformationMessage('✅ Exam mode OFF — the lab has ended.');
     sendToServer('/student/event', {
         student_id: studentId,
         event_type: 'EXAM_MODE_DISABLED',
@@ -1325,6 +1562,23 @@ function disableExamMode() {
         details:    { lab_id: lab ? lab.id : null },
         timestamp:  new Date().toISOString(),
     });
+
+    // The teacher closed the lab: submit what we have, stop monitoring and
+    // sign the student out.
+    const course = lab && lab.course_name ? ` for ${lab.course_name}` : '';
+    sendToServer('/student/event', sessionSummaryPayload());
+    flushEventQueue();
+    sendToServer('/student/disconnect', {
+        student_id: studentId,
+        timestamp:  new Date().toISOString(),
+    });
+    stopMonitoring();
+    isConnected = false;
+    studentId   = null;
+    jwtToken    = null;
+    updateStatusBar('disconnected');
+    refreshFileSessionsView();
+    vscode.window.showInformationMessage(`⏱️ Your time is finished${course}. The lab has been closed by your teacher.`);
 }
 
 async function pollLabStatus() {
@@ -1509,7 +1763,7 @@ function callAIDetectionAPI(payload) {
             headers:  headers,
         };
 
-        const req = https.request(options, (res) => {
+        const req = serverRequest(options, (res) => {
             let data = '';
             res.on('data', chunk => data += chunk);
             res.on('end', () => {
@@ -1652,17 +1906,22 @@ function addSuspiciousScore(points, reason) {
         timestamp: new Date().toISOString(),
     });
 
+    // The score is sent to the server for the teacher. The student is not
+    // shown it (no status-bar number, no score pop-ups).
     updateStatusBar('suspicious');
+    syncScoreSoon();
+}
 
-    if (suspiciousScore >= 80) {
-        vscode.window.showErrorMessage(
-            `🚨 Suspicious score: ${suspiciousScore}/100 — Admin alerted!`
-        );
-    } else if (suspiciousScore >= 50) {
-        vscode.window.showWarningMessage(
-            `⚠️ Your activity score is ${suspiciousScore}/100`
-        );
-    }
+// The dashboard reads the score from the heartbeat, which only runs every
+// 60s. After a score change send one a moment later (debounced) so the
+// teacher sees it almost immediately.
+let scoreSyncTimer = null;
+function syncScoreSoon() {
+    if (scoreSyncTimer || !isConnected) return;
+    scoreSyncTimer = setTimeout(() => {
+        scoreSyncTimer = null;
+        if (isConnected && studentId && jwtToken) sendHeartbeat();
+    }, 1500);
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -1670,7 +1929,8 @@ function addSuspiciousScore(points, reason) {
 // ══════════════════════════════════════════════════════════════
 function updateStatusBar(status) {
     if (!statusBarItem) return;
-    const score = isConnected ? ` | ⚠️${suspiciousScore}/100` : '';
+    if (logoutItem) { if (isConnected) logoutItem.show(); else logoutItem.hide(); }
+    const score = '';   // the score is only shown to the teacher
     const exam  = (isConnected && examMode) ? ' 📝 EXAM' : '';
 
     switch (status) {
@@ -1681,8 +1941,8 @@ function updateStatusBar(status) {
             statusBarItem.command = 'code-monitor.status';
             break;
         case 'disconnected':
-            statusBarItem.text    = '$(circle-slash) Monitor: Not Connected';
-            statusBarItem.color   = '#9E9E9E';
+            statusBarItem.text    = '$(sign-in) Monitor: Click to Login';
+            statusBarItem.color   = '#FFB74D';
             statusBarItem.tooltip = 'Click to Login';
             statusBarItem.command = 'code-monitor.login';
             break;
@@ -1692,9 +1952,9 @@ function updateStatusBar(status) {
             statusBarItem.tooltip = 'Checking credentials...';
             break;
         case 'suspicious':
-            statusBarItem.text    = `$(warning) Monitor: ${studentId}${score}${exam}`;
-            statusBarItem.color   = '#FF9800';
-            statusBarItem.tooltip = 'Suspicious activity detected!';
+            statusBarItem.text    = `$(check) Monitor: ${studentId}${score}${exam}`;
+            statusBarItem.color   = '#4CAF50';
+            statusBarItem.tooltip = 'Connected — Click for status';
             statusBarItem.command = 'code-monitor.status';
             break;
         case 'idle':
@@ -1758,7 +2018,7 @@ function sendToServer(endpoint, data, onResponse) {
         headers:  headers,
     };
 
-    const req = https.request(options, (res) => {
+    const req = serverRequest(options, (res) => {
         if (!serverReachable) {
             serverReachable = true;
             updateStatusBar('connected');
@@ -1817,7 +2077,7 @@ function postAndWait(endpoint, data, timeoutMs) {
         let settled = false;
         const done = () => { if (!settled) { settled = true; resolve(); } };
 
-        const req = https.request({
+        const req = serverRequest({
             hostname: CONFIG.SERVER_HOST,
             port:     CONFIG.SERVER_PORT,
             path:     endpoint,
@@ -1850,6 +2110,21 @@ function deactivate() {
         : null;
     eventQueue = [];
 
+    const pendingSummary = wasConnected
+        ? postAndWait('/student/event', sessionSummaryPayload(), 3000)
+        : null;
+
+    // Closing VS Code while the lab is running also counts as leaving early.
+    const pendingEarly = (wasConnected && examMode)
+        ? postAndWait('/student/event', {
+            student_id: studentId,
+            event_type: 'EARLY_LOGOUT',
+            severity:   'HIGH',
+            details:    earlyLogoutDetails('closed'),
+            timestamp:  new Date().toISOString(),
+        }, 3000)
+        : null;
+
     // Stop heartbeats first: a late heartbeat would mark the student connected again.
     stopMonitoring();
     if (statusBarItem) statusBarItem.dispose();
@@ -1858,7 +2133,7 @@ function deactivate() {
 
     const pendingDisconnect = postAndWait('/student/disconnect', payload, 3000);
     isConnected = false;
-    return pendingEvents ? Promise.all([pendingEvents, pendingDisconnect]) : pendingDisconnect;
+    return Promise.all([pendingEvents, pendingSummary, pendingEarly, pendingDisconnect].filter(Boolean));
 }
 
 module.exports = { activate, deactivate };
