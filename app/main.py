@@ -39,6 +39,9 @@ def _run_light_migrations(engine):
         "ALTER TABLE behavioral_data ADD COLUMN IF NOT EXISTS forbidden_app_visits INTEGER DEFAULT 0",
         "ALTER TABLE behavioral_data ADD COLUMN IF NOT EXISTS external_paste_count INTEGER DEFAULT 0",
         "ALTER TABLE behavioral_data ADD COLUMN IF NOT EXISTS score_decay_applied INTEGER DEFAULT 0",
+        "ALTER TABLE teacher_feedback ADD COLUMN IF NOT EXISTS session_id INTEGER REFERENCES student_sessions(id)",
+        "ALTER TABLE teacher_feedback ADD COLUMN IF NOT EXISTS model_confidence FLOAT",
+        "ALTER TABLE teacher_feedback ALTER COLUMN submission_id DROP NOT NULL",
     ]
     # AUTOCOMMIT + one connection per statement: a failed ALTER (e.g. on a
     # non-Postgres dev DB) must not abort the transaction for the rest.

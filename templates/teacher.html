@@ -1052,6 +1052,14 @@ function renderStudents() {
         <button onclick="disconnectStudent('${id}')" class="px-2 py-1 rounded text-xs bg-red-700 hover:bg-red-600 text-white">Disconnect</button>
         <button onclick="openReport('${id}')" class="px-2 py-1 rounded text-xs bg-gray-700 hover:bg-gray-600 text-white">Report</button>
       </td></tr>
+      <tr class="${s.session_id ? '' : 'hidden'}"><td></td><td colspan="8" class="px-4 pb-2 pt-0" onclick="event.stopPropagation()">
+        <div id="label_${id}" class="flex items-center gap-2 text-xs">
+          <span class="text-gray-500">Model: ${n}% AI</span>
+          <button onclick="quickLabel('${id}', ${s.session_id}, 'human', ${n})" data-label="human-${id}" class="px-2 py-0.5 rounded bg-gray-800 hover:bg-green-700 text-gray-300">✓ Human</button>
+          <button onclick="quickLabel('${id}', ${s.session_id}, 'ai', ${n})" data-label="ai-${id}" class="px-2 py-0.5 rounded bg-gray-800 hover:bg-red-700 text-gray-300">⚠ AI</button>
+          <button onclick="quickLabel('${id}', ${s.session_id}, 'ai_paraphrased', ${n})" data-label="ai_paraphrased-${id}" class="px-2 py-0.5 rounded bg-gray-800 hover:bg-yellow-700 text-gray-300">~ Paraphrased</button>
+        </div>
+      </td></tr>
       <tr id="file_rows_${id}" class="${expanded ? '' : 'hidden'}"><td colspan="9" class="px-4 pb-3 pt-0 bg-gray-950/60">
         <div id="file_rows_body_${id}" class="text-xs text-gray-500 py-2">Loading files…</div>
       </td></tr>`;
@@ -1425,6 +1433,26 @@ async function quickAiFeedback(agreed) {
 }
 
 // ── SECTION 3: quick actions ───────────────────────────────────
+async function quickLabel(id, sessionId, label, suspicion) {
+  if (!sessionId) { toast('No active session for this student yet', 'err'); return; }
+  const container = document.getElementById(`label_${id}`);
+  try {
+    const modelPrediction = suspicion >= 50 ? 'AI' : 'Human';
+    const res = await post('/teacher/feedback/label', {
+      session_id: sessionId, student_id: id, teacher_label: label,
+      model_prediction: modelPrediction, model_confidence: suspicion / 100,
+    });
+    if (container) {
+      container.querySelectorAll('button').forEach(b => b.disabled = true);
+      const btn = container.querySelector(`[data-label="${label}-${id}"]`);
+      if (btn) btn.classList.add('ring-2', 'ring-white');
+      container.insertAdjacentHTML('beforeend', '<span class="text-green-400 font-medium">Labeled ✓</span>');
+    }
+    if (res.retrain_triggered) toast('Labeled — retrain triggered', 'ok');
+    else toast('Labeled', 'ok');
+  } catch (e) { toast(e.message, 'err'); }
+}
+
 async function warnStudent(id) {
   const msg = await dialog({ title: `Warn ${id}`, message: 'This warning is stored and shown in the teacher view.',
                              input: 'Please stay focused on the exam and avoid pasting code.', okText: 'Send Warning' });

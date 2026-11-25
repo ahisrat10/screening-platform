@@ -209,6 +209,26 @@ class WarnRequest(BaseModel):
 class ResetDatabaseRequest(BaseModel):
     confirm: str          # must be exactly "RESET"
 
+class QuickLabelRequest(BaseModel):
+    """Per-row Human / AI / Paraphrased label buttons in the per-class
+    monitoring view. Writes to teacher_feedback (session_id-keyed), feeding
+    the continual-learning retrain pipeline — separate from the
+    submission-id-keyed /teacher/submission-feedback flow above."""
+    session_id:       int
+    student_id:       str
+    teacher_label:    str   # human | ai | ai_paraphrased
+    model_prediction: Optional[str] = None
+    model_confidence: Optional[float] = None
+    notes:            Optional[str] = None
+
+    @field_validator('teacher_label')
+    def validate_label(cls, v):
+        v = (v or "").lower()
+        if v not in ("human", "ai", "ai_paraphrased"):
+            raise ValueError('teacher_label must be "human", "ai", or "ai_paraphrased"')
+        return v
+
+
 class TeacherAIFeedbackRequest(BaseModel):
     """Session-based quick agree/disagree with the AI-detection verdict
     (teacher.html panel). Writes to correction_memory for later retraining."""

@@ -349,12 +349,17 @@ class TeacherFeedback(Base):
     __tablename__ = "teacher_feedback"
 
     id                = Column(Integer, primary_key=True, index=True)
-    submission_id     = Column(Integer, ForeignKey("submissions.id"), index=True)
+    submission_id     = Column(Integer, ForeignKey("submissions.id"), index=True, nullable=True)
+    # Set by the quick per-row Human/AI/Paraphrased label buttons in the
+    # per-class monitoring view (/teacher/feedback/label); the older
+    # /teacher/submission-feedback flow above leaves this null.
+    session_id        = Column(Integer, ForeignKey("student_sessions.id"), index=True, nullable=True)
     student_id        = Column(String(50), ForeignKey("users.student_id"), nullable=True)
     teacher_id        = Column(String(50), ForeignKey("users.student_id"), nullable=True)
     model_prediction  = Column(String(10), nullable=True)
     teacher_label     = Column(String(10), nullable=True)
     confidence        = Column(Float, nullable=True)
+    model_confidence  = Column(Float, nullable=True)
     notes             = Column(String, nullable=True)
     is_processed      = Column(Boolean, default=False)
     created_at        = Column(DateTime, server_default=func.now())

@@ -231,6 +231,39 @@
     </div>
   </section>
 
+  <!-- Model Management -->
+  <section class="bg-gray-900 rounded-xl border border-gray-800">
+    <div class="p-4 border-b border-gray-800">
+      <h2 class="text-white text-lg">Model Management</h2>
+      <p class="text-gray-400 text-sm">Continual learning from teacher labels (Human / AI / Paraphrased buttons on the per-class monitoring view).</p>
+    </div>
+    <div class="p-4 space-y-4">
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div class="bg-gray-800/50 rounded-lg p-3">
+          <p class="text-gray-500 text-xs">Last Retrain</p>
+          <p id="rt_last" class="text-white text-sm font-medium mt-1">—</p>
+        </div>
+        <div class="bg-gray-800/50 rounded-lg p-3">
+          <p class="text-gray-500 text-xs">Total Feedback</p>
+          <p id="rt_count" class="text-white text-sm font-medium mt-1">—</p>
+        </div>
+        <div class="bg-gray-800/50 rounded-lg p-3">
+          <p class="text-gray-500 text-xs">Until Next Auto-Retrain</p>
+          <p id="rt_next" class="text-white text-sm font-medium mt-1">—</p>
+        </div>
+        <div class="bg-gray-800/50 rounded-lg p-3">
+          <p class="text-gray-500 text-xs">Last Samples Used</p>
+          <p id="rt_samples" class="text-white text-sm font-medium mt-1">—</p>
+        </div>
+      </div>
+      <div class="flex items-center gap-3">
+        <button id="rt_btn" onclick="retrainNow()" class="bg-blue-600 text-white text-sm font-medium px-4 py-2 rounded-lg">Retrain Model Now</button>
+        <span id="rt_spinner" class="hidden text-gray-400 text-xs">Retraining…</span>
+      </div>
+      <div id="rt_result" class="text-sm"></div>
+    </div>
+  </section>
+
   <!-- Danger zone -->
   <section class="bg-gray-900 rounded-xl border border-red-900/70">
     <div class="p-4 flex items-center justify-between gap-4 flex-wrap">
@@ -495,6 +528,34 @@ async function loadDatasetPickers() {
   } catch (e) {}
 }
 
+// ── model retrain ───────────────────────────────────────────────
+async function loadRetrainStatus() {
+  try {
+    const s = await getJSON('/admin/retrain/status');
+    document.getElementById('rt_last').textContent = s.last_retrain_at ? new Date(s.last_retrain_at).toLocaleString() : 'Never';
+    document.getElementById('rt_count').textContent = s.current_feedback_count;
+    document.getElementById('rt_next').textContent = s.next_retrain_at;
+    document.getElementById('rt_samples').textContent = s.samples_used || '—';
+  } catch (e) {}
+}
+async function retrainNow() {
+  const btn = document.getElementById('rt_btn'), spinner = document.getElementById('rt_spinner'), result = document.getElementById('rt_result');
+  btn.disabled = true; spinner.classList.remove('hidden'); result.textContent = '';
+  try {
+    const res = await getJSON('/admin/retrain', { method: 'POST' });
+    if (res.success) {
+      result.innerHTML = `<span class="text-green-400">Retrained on ${res.samples_used} samples, ${res.epochs} epochs, final loss ${res.final_loss}.</span>`;
+    } else {
+      result.innerHTML = `<span class="text-yellow-400">${esc(res.message || 'Retrain did not run.')}</span>`;
+    }
+    loadRetrainStatus();
+  } catch (e) {
+    result.innerHTML = `<span class="text-red-400">${esc(e.message)}</span>`;
+  } finally {
+    btn.disabled = false; spinner.classList.add('hidden');
+  }
+}
+
 // ── teacher sign-up code ───────────────────────────────────────
 async function loadTeacherCode() {
   try { document.getElementById('teacher_code_input').value = (await getJSON('/admin/teacher-code')).code || ''; } catch (e) {}
@@ -701,6 +762,7 @@ if (token && role === 'admin') {
     const f = rs.find(r => r.status === 'rejected');
     if (f) banner(f.reason.message, 'err');
     loadDatasetPickers();
+    loadRetrainStatus();
   });
 }
 </script>

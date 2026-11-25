@@ -4,7 +4,7 @@ from typing import Optional
 import logging
 from pathlib import Path
 
-from fastapi import APIRouter, Body, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException
 from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
 
@@ -340,6 +340,84 @@ def submit_ai_feedback(
         "ai_prediction":    data.ai_prediction,
         "correction_label": correction_label,
     }
+
+
+RETRAIN_LABEL_THRESHOLD = 10
+
+
+def _run_retrain_job():
+    from .database import SessionLocal
+    from .ml import retrain as retrain_mod
+    db = SessionLocal()
+    try:
+        retrain_mod.run_retrain(db)
+    finally:
+        db.close()
+
+
+@router.post("/teacher/feedback/label")
+def submit_quick_label(
+    data: schemas.QuickLabelRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    teacher = Depends(auth.get_teacher_user),
+):
+    """Human / AI / Paraphrased label buttons on each student row in the
+    per-class monitoring view. Feeds the continual-learning retrain
+    pipeline (every 10th labeled sample triggers a background retrain)."""
+    _require_visible(db, teacher, data.student_id)
+
+    session = db.query(models.StudentSession).filter(
+        models.StudentSession.id == data.session_id,
+        models.StudentSession.student_id == data.student_id,
+    ).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found for this student")
+
+    row = models.TeacherFeedback(
+        session_id       = data.session_id,
+        student_id       = data.student_id,
+        teacher_id       = teacher.student_id,
+        model_prediction = data.model_prediction,
+        teacher_label    = data.teacher_label,
+        confidence       = data.model_confidence,
+        model_confidence = data.model_confidence,
+        notes            = data.notes,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+
+    total = db.query(models.TeacherFeedback).filter(
+        models.TeacherFeedback.session_id.isnot(None),
+        models.TeacherFeedback.teacher_label.isnot(None),
+    ).count()
+    retrain_triggered = total > 0 and total % RETRAIN_LABEL_THRESHOLD == 0
+    if retrain_triggered:
+        background_tasks.add_task(_run_retrain_job)
+
+    return {"success": True, "feedback_id": row.id, "retrain_triggered": retrain_triggered}
+
+
+@router.get("/teacher/feedback/mine")
+def my_quick_labels(
+    db: Session = Depends(get_db),
+    teacher = Depends(auth.get_teacher_user),
+):
+    rows = db.query(models.TeacherFeedback).filter(
+        models.TeacherFeedback.teacher_id == teacher.student_id,
+        models.TeacherFeedback.session_id.isnot(None),
+    ).order_by(models.TeacherFeedback.created_at.desc(), models.TeacherFeedback.id.desc()).all()
+    return [{
+        "id":               r.id,
+        "session_id":       r.session_id,
+        "student_id":       r.student_id,
+        "teacher_label":    r.teacher_label,
+        "model_prediction": r.model_prediction,
+        "model_confidence": r.model_confidence,
+        "notes":            r.notes,
+        "created_at":       str(r.created_at),
+    } for r in rows]
 
 
 # ── dashboard page ─────────────────────────────────────────────

@@ -348,6 +348,13 @@ def _flat_row(db: Session, sess: models.StudentSession, user, label, anonymized:
             beh_q = beh_q.filter(models.BehavioralData.created_at >= started)
         beh = beh_q.order_by(models.BehavioralData.created_at.desc(), models.BehavioralData.id.desc()).first()
 
+    # Quick Human/AI/Paraphrased label buttons (per-class monitoring view)
+    # feed teacher_feedback.session_id — separate from the human/ai/unsure
+    # TeacherLabel row already joined in via `label` above.
+    fb = db.query(models.TeacherFeedback).filter(
+        models.TeacherFeedback.session_id == sess.id
+    ).order_by(models.TeacherFeedback.created_at.desc(), models.TeacherFeedback.id.desc()).first()
+
     row = {
         "session_id":   sess.id,
         "class_name":   _class_name_for(db, sid),
@@ -358,7 +365,9 @@ def _flat_row(db: Session, sess: models.StudentSession, user, label, anonymized:
         "email":        "REDACTED" if anonymized else (user.email if user else None),
         "ai_probability":  sub.ai_probability if sub else None,
         "model_confidence": sub.ai_confidence if sub else None,
-        "teacher_label":   label.label if label else None,
+        "teacher_label":   (fb.teacher_label if fb else None) or (label.label if label else None),
+        "model_prediction": fb.model_prediction if fb else None,
+        "teacher_notes":     fb.notes if fb else None,
         "code_length":  len(sub.code) if sub and sub.code else 0,
         "language":     sub.language if sub else None,
     }
@@ -377,7 +386,8 @@ def _rows_to_xlsx(rows: list) -> bytes:
     ws.title = "Sessions"
     headers = list(rows[0].keys()) if rows else (
         ["session_id", "class_name", "lab_name", "submitted_at", "student_id", "student_name",
-         "email", "ai_probability", "model_confidence", "teacher_label", "code_length", "language"]
+         "email", "ai_probability", "model_confidence", "teacher_label", "model_prediction",
+         "teacher_notes", "code_length", "language"]
         + BEHAVIORAL_FEATURE_COLUMNS
     )
     ws.append(headers)
@@ -519,3 +529,21 @@ def export_flat_labeled(
     rows = _all_sessions_rows(db)
     rows = [r for r in rows if r.get("teacher_label")]
     return _respond_rows(rows, format, f"codeverity-labeled-{datetime.utcnow().strftime('%Y-%m-%d')}")
+
+
+@router.post("/admin/retrain")
+def admin_retrain(
+    db: Session = Depends(get_db),
+    admin = Depends(auth.get_admin_user),
+):
+    from .ml import retrain as retrain_mod
+    return retrain_mod.run_retrain(db)
+
+
+@router.get("/admin/retrain/status")
+def admin_retrain_status(
+    db: Session = Depends(get_db),
+    admin = Depends(auth.get_admin_user),
+):
+    from .ml import retrain as retrain_mod
+    return retrain_mod.get_status(db)
