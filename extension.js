@@ -168,6 +168,9 @@ let lastExternalApp       = null;
 let clipHashBeforeBlur    = null;
 let externalClips         = new Map();          // hash -> { app, scored } for text copied outside VS Code
 let decayTimer            = null;
+let forbiddenAppVisitCount = 0;                 // completed visits to a forbidden app (brief or scored)
+let externalPasteCount     = 0;                 // pastes matched to clipboard text copied outside VS Code
+let scoreDecayAppliedCount = 0;                  // times decayScore() actually reduced the score
 
 // ══════════════════════════════════════════════════════════════
 // PER-FILE SCORING SESSIONS (Issue 2 — multiple files per student)
@@ -967,6 +970,7 @@ function finishExternalVisit() {
     const { app, start } = externalVisit;
     externalVisit  = null;
     lastExternalAt = Date.now();
+    forbiddenAppVisitCount++;
     const durMs = lastExternalAt - start;
     if (durMs < CONFIG.EXTERNAL_GRACE_MS) {
         queueBehavioralEvent('EXTERNAL_APP_BRIEF', 'LOW', { app, seconds: Math.round(durMs / 1000) });
@@ -1035,6 +1039,7 @@ async function classifyAndScorePaste(text, chars, preview, sameFile) {
             ext.scored = true;
             source = 'external';
             points = CONFIG.EXTERNAL_PASTE_POINTS;
+            externalPasteCount++;
         } else {
             source = 'external-repeat';             // same copy pasted again: no new cost
             points = 0;
@@ -1072,6 +1077,7 @@ function decayScore() {
     if (!isConnected || suspiciousScore <= 0) return;
     if (externalVisit || Date.now() - lastExternalAt < CONFIG.DECAY_QUIET_MS) return;
     suspiciousScore = Math.max(0, suspiciousScore - CONFIG.SCORE_DECAY_POINTS);
+    scoreDecayAppliedCount++;
     updateStatusBar(isWindowFocused ? 'connected' : 'suspicious');
 }
 
@@ -1102,6 +1108,9 @@ function resetBehavioralState() {
     lastCodeTokensHash      = null;
     fileSessions            = new Map();
     eventQueue              = [];
+    forbiddenAppVisitCount  = 0;
+    externalPasteCount      = 0;
+    scoreDecayAppliedCount  = 0;
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -1702,6 +1711,11 @@ function collectBehavioralSignals() {
         code_complexity_avg:        Number(avgComplexity.toFixed(2)),
         code_fingerprint:           lastCodeFingerprint,
         code_tokens_hash:           lastCodeTokensHash,
+
+        // ── 1.0.6 signals ────────────────────────────────────
+        forbidden_app_visits:       forbiddenAppVisitCount,
+        external_paste_count:       externalPasteCount,
+        score_decay_applied:        scoreDecayAppliedCount,
     };
 }
 
