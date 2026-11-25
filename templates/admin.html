@@ -141,6 +141,96 @@
     </div>
   </section>
 
+  <!-- Datasets -->
+  <section class="bg-gray-900 rounded-xl border border-gray-800">
+    <div class="p-4 border-b border-gray-800">
+      <h2 class="text-white text-lg">Datasets</h2>
+      <p class="text-gray-400 text-sm">Download raw session data (behavioral signals, AI scores, teacher labels) as JSON or Excel.</p>
+    </div>
+    <div class="p-4 space-y-4">
+
+      <div class="flex items-center justify-between gap-3 flex-wrap bg-gray-800/50 rounded-lg p-3">
+        <div>
+          <p class="text-white text-sm font-medium">Export all data</p>
+          <p class="text-gray-500 text-xs">Every session, every class, every student.</p>
+        </div>
+        <div class="flex gap-2">
+          <button onclick="downloadExport('/admin/export/all','json')" class="bg-gray-700 text-white text-sm font-medium px-3 py-1.5 rounded-lg">JSON</button>
+          <button onclick="downloadExport('/admin/export/all','excel')" class="bg-blue-600 text-white text-sm font-medium px-3 py-1.5 rounded-lg">Excel</button>
+        </div>
+      </div>
+
+      <div class="flex items-center justify-between gap-3 flex-wrap bg-gray-800/50 rounded-lg p-3">
+        <div>
+          <p class="text-white text-sm font-medium">Export by date range</p>
+          <div class="flex items-center gap-2 mt-2">
+            <input type="date" id="ds_start" class="bg-gray-800 text-white text-sm px-2 py-1.5 rounded-lg border border-gray-700"/>
+            <span class="text-gray-500 text-sm">to</span>
+            <input type="date" id="ds_end" class="bg-gray-800 text-white text-sm px-2 py-1.5 rounded-lg border border-gray-700"/>
+          </div>
+        </div>
+        <div class="flex gap-2">
+          <button onclick="downloadDateRange('json')" class="bg-gray-700 text-white text-sm font-medium px-3 py-1.5 rounded-lg">JSON</button>
+          <button onclick="downloadDateRange('excel')" class="bg-blue-600 text-white text-sm font-medium px-3 py-1.5 rounded-lg">Excel</button>
+        </div>
+      </div>
+
+      <div class="flex items-center justify-between gap-3 flex-wrap bg-gray-800/50 rounded-lg p-3">
+        <div>
+          <p class="text-white text-sm font-medium">Export by class</p>
+          <select id="ds_class" aria-label="Class to export"
+            class="bg-gray-800 text-white text-sm px-3 py-2 rounded-lg border border-gray-700 mt-2 max-w-[18rem]">
+            <option value="">Select a class…</option>
+          </select>
+        </div>
+        <div class="flex gap-2">
+          <button onclick="downloadByClass('json')" class="bg-gray-700 text-white text-sm font-medium px-3 py-1.5 rounded-lg">JSON</button>
+          <button onclick="downloadByClass('excel')" class="bg-blue-600 text-white text-sm font-medium px-3 py-1.5 rounded-lg">Excel</button>
+        </div>
+      </div>
+
+      <div class="flex items-center justify-between gap-3 flex-wrap bg-gray-800/50 rounded-lg p-3">
+        <div>
+          <p class="text-white text-sm font-medium">Export by student</p>
+          <select id="ds_student" aria-label="Student to export"
+            class="bg-gray-800 text-white text-sm px-3 py-2 rounded-lg border border-gray-700 mt-2 max-w-[18rem]">
+            <option value="">Select a student…</option>
+          </select>
+          <label class="flex items-center gap-2 mt-2 text-gray-400 text-xs">
+            <input type="checkbox" id="ds_anon"> Anonymized (hide name &amp; email)
+          </label>
+        </div>
+        <div class="flex gap-2">
+          <button onclick="downloadByStudent('json')" class="bg-gray-700 text-white text-sm font-medium px-3 py-1.5 rounded-lg">JSON</button>
+          <button onclick="downloadByStudent('excel')" class="bg-blue-600 text-white text-sm font-medium px-3 py-1.5 rounded-lg">Excel</button>
+        </div>
+      </div>
+
+      <div class="flex items-center justify-between gap-3 flex-wrap bg-gray-800/50 rounded-lg p-3">
+        <div>
+          <p class="text-white text-sm font-medium">Export flagged sessions</p>
+          <p class="text-gray-500 text-xs">AI probability &gt; 50% or teacher-labeled "ai".</p>
+        </div>
+        <div class="flex gap-2">
+          <button onclick="downloadExport('/admin/export/flagged','json')" class="bg-gray-700 text-white text-sm font-medium px-3 py-1.5 rounded-lg">JSON</button>
+          <button onclick="downloadExport('/admin/export/flagged','excel')" class="bg-blue-600 text-white text-sm font-medium px-3 py-1.5 rounded-lg">Excel</button>
+        </div>
+      </div>
+
+      <div class="flex items-center justify-between gap-3 flex-wrap bg-gray-800/50 rounded-lg p-3">
+        <div>
+          <p class="text-white text-sm font-medium">Export teacher-labeled sessions</p>
+          <p class="text-gray-500 text-xs">Only sessions a teacher has labeled human / ai / paraphrased.</p>
+        </div>
+        <div class="flex gap-2">
+          <button onclick="downloadExport('/admin/export/labeled','json')" class="bg-gray-700 text-white text-sm font-medium px-3 py-1.5 rounded-lg">JSON</button>
+          <button onclick="downloadExport('/admin/export/labeled','excel')" class="bg-blue-600 text-white text-sm font-medium px-3 py-1.5 rounded-lg">Excel</button>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
   <!-- Danger zone -->
   <section class="bg-gray-900 rounded-xl border border-red-900/70">
     <div class="p-4 flex items-center justify-between gap-4 flex-wrap">
@@ -368,6 +458,43 @@ function renderMonitor() {
   </tr>`).join('');
 }
 
+// ── dataset exports ─────────────────────────────────────────────
+async function downloadExport(path, fmt) {
+  try {
+    const url = `${path}?format=${fmt}`;
+    const blob = await (await request(url)).blob();
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+    a.download = ''; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  } catch (e) { banner(e.message, 'err'); }
+}
+function downloadDateRange(fmt) {
+  const start = document.getElementById('ds_start').value, end = document.getElementById('ds_end').value;
+  if (!start || !end) { banner('Pick both a start and end date.', 'err'); return; }
+  downloadExport(`/admin/export/daterange?start=${start}&end=${end}`, fmt);
+}
+function downloadByClass(fmt) {
+  const id = document.getElementById('ds_class').value;
+  if (!id) { banner('Pick a class to export.', 'err'); return; }
+  downloadExport(`/admin/export/class/${id}`, fmt);
+}
+function downloadByStudent(fmt) {
+  const id = document.getElementById('ds_student').value;
+  if (!id) { banner('Pick a student to export.', 'err'); return; }
+  const anon = document.getElementById('ds_anon').checked;
+  downloadExport(`/admin/export/student/${id}?anonymized=${anon}`, fmt);
+}
+async function loadDatasetPickers() {
+  try {
+    const classes = monitorClasses.length ? monitorClasses : await getJSON('/teacher/classes');
+    document.getElementById('ds_class').innerHTML = '<option value="">Select a class…</option>' + classes.map(c =>
+      `<option value="${c.id}">${esc(c.course_name)} · ${esc(c.section)} (${esc(c.semester)})</option>`).join('');
+    const students = monitorStudents.length ? monitorStudents : await getJSON('/admin/all-students');
+    document.getElementById('ds_student').innerHTML = '<option value="">Select a student…</option>' + students.map(s =>
+      `<option value="${esc(s.student_id)}">${esc(s.full_name || s.student_id)} (${esc(s.student_id)})</option>`).join('');
+  } catch (e) {}
+}
+
 // ── teacher sign-up code ───────────────────────────────────────
 async function loadTeacherCode() {
   try { document.getElementById('teacher_code_input').value = (await getJSON('/admin/teacher-code')).code || ''; } catch (e) {}
@@ -573,6 +700,7 @@ if (token && role === 'admin') {
   Promise.allSettled([loadOverview(), loadUsers(), loadMonitor()]).then(rs => {
     const f = rs.find(r => r.status === 'rejected');
     if (f) banner(f.reason.message, 'err');
+    loadDatasetPickers();
   });
 }
 </script>

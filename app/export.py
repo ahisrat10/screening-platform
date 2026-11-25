@@ -302,3 +302,220 @@ def export_all_sessions(
     admin = Depends(auth.get_admin_user),
 ):
     return _export(db, admin, labeled_only=False, date=date)
+
+
+# ══════════════════════════════════════════════════════════════
+# Flat (one-row-per-session) exports used by the admin "Datasets" page.
+# Reuses the session-building helpers above, flattened for Excel/filters.
+# ══════════════════════════════════════════════════════════════
+from .models import BEHAVIORAL_FEATURE_COLUMNS  # noqa: E402
+
+
+def _class_name_for(db: Session, student_id: str) -> Optional[str]:
+    cm = db.query(models.ClassMember, models.Classroom).join(
+        models.Classroom, models.Classroom.id == models.ClassMember.class_id
+    ).filter(models.ClassMember.student_id == student_id).first()
+    if not cm:
+        return None
+    _, c = cm
+    return f"{c.course_name} ({c.section})" if c.section else c.course_name
+
+
+def _flat_row(db: Session, sess: models.StudentSession, user, label, anonymized: bool = False) -> dict:
+    sid = sess.student_id
+    started = sess.connected_at
+
+    problem = None
+    if started:
+        problem = db.query(models.Problem).filter(
+            models.Problem.created_at <= started
+        ).order_by(models.Problem.created_at.desc(), models.Problem.id.desc()).first()
+
+    sub_q = db.query(models.Submission).filter(
+        models.Submission.student_id == sid,
+        models.Submission.ai_prediction.isnot(None),
+    )
+    if started:
+        sub_q = sub_q.filter(models.Submission.timestamp >= started)
+    sub = sub_q.order_by(models.Submission.timestamp.desc(), models.Submission.id.desc()).first()
+
+    beh = None
+    if sub is not None and sub.behavioral_data_id:
+        beh = db.query(models.BehavioralData).filter(models.BehavioralData.id == sub.behavioral_data_id).first()
+    if beh is None:
+        beh_q = db.query(models.BehavioralData).filter(models.BehavioralData.student_id == sid)
+        if started:
+            beh_q = beh_q.filter(models.BehavioralData.created_at >= started)
+        beh = beh_q.order_by(models.BehavioralData.created_at.desc(), models.BehavioralData.id.desc()).first()
+
+    row = {
+        "session_id":   sess.id,
+        "class_name":   _class_name_for(db, sid),
+        "lab_name":     problem.title if problem else None,
+        "submitted_at": _iso(sub.timestamp) if sub else _iso(sess.connected_at),
+        "student_id":   sid,
+        "student_name": "REDACTED" if anonymized else (user.full_name if user else None),
+        "email":        "REDACTED" if anonymized else (user.email if user else None),
+        "ai_probability":  sub.ai_probability if sub else None,
+        "model_confidence": sub.ai_confidence if sub else None,
+        "teacher_label":   label.label if label else None,
+        "code_length":  len(sub.code) if sub and sub.code else 0,
+        "language":     sub.language if sub else None,
+    }
+    for col in BEHAVIORAL_FEATURE_COLUMNS:
+        row[col] = getattr(beh, col, None) if beh else None
+    return row
+
+
+def _rows_to_xlsx(rows: list) -> bytes:
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Font, PatternFill
+    from openpyxl.utils import get_column_letter
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Sessions"
+    headers = list(rows[0].keys()) if rows else (
+        ["session_id", "class_name", "lab_name", "submitted_at", "student_id", "student_name",
+         "email", "ai_probability", "model_confidence", "teacher_label", "code_length", "language"]
+        + BEHAVIORAL_FEATURE_COLUMNS
+    )
+    ws.append(headers)
+    for cell in ws[1]:
+        cell.fill = PatternFill("solid", fgColor="23336A")
+        cell.font = Font(bold=True, color="FFFFFF")
+        cell.alignment = Alignment(vertical="center", wrap_text=True)
+    for r in rows:
+        ws.append([r.get(h) for h in headers])
+    ws.freeze_panes = "A2"
+    for i, h in enumerate(headers, 1):
+        width = max(len(str(h)), *(len(str(r.get(h))) for r in rows)) if rows else len(str(h))
+        ws.column_dimensions[get_column_letter(i)].width = min(max(width + 2, 10), 40)
+
+    import io
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def _respond_rows(rows: list, fmt: str, filename_base: str) -> Response:
+    if fmt == "excel":
+        content = _rows_to_xlsx(rows)
+        return Response(
+            content=content,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f'attachment; filename="{filename_base}.xlsx"'},
+        )
+    body = json.dumps(_clean(rows), ensure_ascii=False, allow_nan=False)
+    return Response(
+        content=body,
+        media_type="application/json",
+        headers={"Content-Disposition": f'attachment; filename="{filename_base}.json"'},
+    )
+
+
+def _all_sessions_rows(db: Session, anonymized: bool = False,
+                        student_ids: Optional[list] = None,
+                        since=None, until=None) -> list:
+    user_q = db.query(models.User).filter(models.User.role == "student")
+    if student_ids is not None:
+        user_q = user_q.filter(models.User.student_id.in_(student_ids))
+    students = {u.student_id: u for u in user_q.all()}
+    if not students:
+        return []
+    sess_q = db.query(models.StudentSession).filter(
+        models.StudentSession.student_id.in_(list(students.keys()))
+    )
+    if since:
+        sess_q = sess_q.filter(models.StudentSession.connected_at >= since)
+    if until:
+        sess_q = sess_q.filter(models.StudentSession.connected_at <= until)
+    sessions = sess_q.order_by(models.StudentSession.id.asc()).all()
+    labels = _latest_labels(db)
+    return [_flat_row(db, s, students.get(s.student_id), labels.get(s.id), anonymized) for s in sessions]
+
+
+@router.get("/admin/export/all")
+def export_flat_all(
+    format: str = Query("json", pattern="^(json|excel)$"),
+    db: Session = Depends(get_db),
+    admin = Depends(auth.get_admin_user),
+):
+    _check_rate_limit(admin.student_id)
+    rows = _all_sessions_rows(db)
+    return _respond_rows(rows, format, f"codeverity-all-{datetime.utcnow().strftime('%Y-%m-%d')}")
+
+
+@router.get("/admin/export/daterange")
+def export_flat_daterange(
+    start: str = Query(..., description="YYYY-MM-DD"),
+    end: str = Query(..., description="YYYY-MM-DD"),
+    format: str = Query("json", pattern="^(json|excel)$"),
+    db: Session = Depends(get_db),
+    admin = Depends(auth.get_admin_user),
+):
+    _check_rate_limit(admin.student_id)
+    _validate_date_filter(start)
+    _validate_date_filter(end)
+    since = datetime.strptime(start, "%Y-%m-%d")
+    until = datetime.strptime(end, "%Y-%m-%d").replace(hour=23, minute=59, second=59)
+    rows = _all_sessions_rows(db, since=since, until=until)
+    return _respond_rows(rows, format, f"codeverity-{start}-to-{end}")
+
+
+@router.get("/admin/export/class/{class_id}")
+def export_flat_class(
+    class_id: int,
+    format: str = Query("json", pattern="^(json|excel)$"),
+    db: Session = Depends(get_db),
+    admin = Depends(auth.get_admin_user),
+):
+    _check_rate_limit(admin.student_id)
+    c = db.query(models.Classroom).filter(models.Classroom.id == class_id).first()
+    if not c:
+        raise HTTPException(status_code=404, detail="Class not found")
+    student_ids = [m.student_id for m in db.query(models.ClassMember).filter(
+        models.ClassMember.class_id == class_id).all()]
+    rows = _all_sessions_rows(db, student_ids=student_ids)
+    return _respond_rows(rows, format, f"codeverity-class-{class_id}-{datetime.utcnow().strftime('%Y-%m-%d')}")
+
+
+@router.get("/admin/export/student/{student_id}")
+def export_flat_student(
+    student_id: str,
+    format: str = Query("json", pattern="^(json|excel)$"),
+    anonymized: bool = Query(False),
+    db: Session = Depends(get_db),
+    admin = Depends(auth.get_admin_user),
+):
+    _check_rate_limit(admin.student_id)
+    rows = _all_sessions_rows(db, anonymized=anonymized, student_ids=[student_id])
+    if not rows:
+        user = db.query(models.User).filter(models.User.student_id == student_id).first()
+        if not user:
+            raise HTTPException(status_code=404, detail="Student not found")
+    return _respond_rows(rows, format, f"codeverity-student-{student_id}-{datetime.utcnow().strftime('%Y-%m-%d')}")
+
+
+@router.get("/admin/export/flagged")
+def export_flat_flagged(
+    format: str = Query("json", pattern="^(json|excel)$"),
+    db: Session = Depends(get_db),
+    admin = Depends(auth.get_admin_user),
+):
+    _check_rate_limit(admin.student_id)
+    rows = _all_sessions_rows(db)
+    rows = [r for r in rows if (r.get("ai_probability") or 0) > 0.5 or r.get("teacher_label") == "ai"]
+    return _respond_rows(rows, format, f"codeverity-flagged-{datetime.utcnow().strftime('%Y-%m-%d')}")
+
+
+@router.get("/admin/export/labeled")
+def export_flat_labeled(
+    format: str = Query("json", pattern="^(json|excel)$"),
+    db: Session = Depends(get_db),
+    admin = Depends(auth.get_admin_user),
+):
+    _check_rate_limit(admin.student_id)
+    rows = _all_sessions_rows(db)
+    rows = [r for r in rows if r.get("teacher_label")]
+    return _respond_rows(rows, format, f"codeverity-labeled-{datetime.utcnow().strftime('%Y-%m-%d')}")
