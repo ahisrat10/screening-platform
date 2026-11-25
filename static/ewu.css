@@ -190,3 +190,6 @@ html body.ewu-auth #eye { color: var(--navy) !important; background: none !impor
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; animation: none !important; }
 }
+
+/* Form-field text colour: dark ink on the theme's light inputs. */
+input, textarea, select { color: #1a1a2e !important; }

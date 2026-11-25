@@ -221,6 +221,26 @@ def create_class(data: ClassCreateRequest, db: Session = Depends(get_db),
             "class": _class_dict(db, c, teacher.full_name, 0, None)}
 
 
+@router.delete("/teacher/classes/{class_id}")
+def delete_class(class_id: int, db: Session = Depends(get_db),
+                 teacher=Depends(auth.get_teacher_user)):
+    """Delete a class and everything scoped to it (enrollments, invite links,
+    invitations, lab sessions). Only the owning teacher (or an admin) may do
+    this. exam_state.class_id is nulled rather than blocking the delete,
+    since exam_state is a singleton control row, not class-owned data."""
+    c = _owned_class(db, teacher, class_id)
+
+    db.query(models.ExamState).filter(models.ExamState.class_id == class_id).update({"class_id": None})
+    db.query(models.ClassMember).filter(models.ClassMember.class_id == class_id).delete()
+    db.query(models.ClassInviteLink).filter(models.ClassInviteLink.class_id == class_id).delete()
+    db.query(models.ClassInvitation).filter(models.ClassInvitation.class_id == class_id).delete()
+    db.query(models.LabSession).filter(models.LabSession.class_id == class_id).delete()
+
+    db.delete(c)
+    db.commit()
+    return {"message": "Class deleted", "success": True}
+
+
 @router.post("/teacher/classes/{class_id}/ai-detection")
 def toggle_ai_detection(class_id: int, data: ToggleRequest, db: Session = Depends(get_db),
                         teacher=Depends(auth.get_teacher_user)):

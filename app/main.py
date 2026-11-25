@@ -1,5 +1,6 @@
 from fastapi import FastAPI, Depends, HTTPException, WebSocket, WebSocketDisconnect, Header, Query, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 from datetime import datetime
@@ -129,6 +130,12 @@ app.include_router(export_router)
 app.include_router(classes_router)
 app.include_router(rooms_router)
 app.include_router(portals_router)
+
+# Every template links /assets/ewu.css (and /assets/ewu-logo.svg) for the
+# EWU portal theme; without this mount those requests 404 and the whole
+# redesign silently falls back to unstyled Tailwind defaults.
+import os as _os
+app.mount("/assets", StaticFiles(directory=_os.path.join(_os.path.dirname(__file__), "..", "static")), name="assets")
 
 logger = logging.getLogger("screening")
 
