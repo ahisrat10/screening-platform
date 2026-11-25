@@ -141,6 +141,20 @@ def _exam_dict(st: models.ExamState) -> dict:
     }
 
 
+def _require_own_student(db: Session, teacher, student_id: str) -> None:
+    """Raise 403 unless this student is a member of a class this teacher owns."""
+    if teacher.role == "admin":
+        return
+    owns = db.query(models.ClassMember).join(
+        models.Classroom, models.Classroom.id == models.ClassMember.class_id
+    ).filter(
+        models.Classroom.teacher_id == teacher.student_id,
+        models.ClassMember.student_id == student_id,
+    ).first()
+    if not owns:
+        raise HTTPException(status_code=403, detail="Student is not in one of your classes")
+
+
 def _owned_class_id(db: Session, teacher, class_id: int) -> int:
     """Validate class_id belongs to this teacher (or caller is admin); raise otherwise."""
     c = db.query(models.Classroom).filter(models.Classroom.id == class_id).first()
@@ -365,7 +379,12 @@ def submit_quick_label(
     """Human / AI / Paraphrased label buttons on each student row in the
     per-class monitoring view. Feeds the continual-learning retrain
     pipeline (every 10th labeled sample triggers a background retrain)."""
-    _require_visible(db, teacher, data.student_id)
+    student = db.query(models.User).filter(
+        models.User.student_id == data.student_id, models.User.role == "student"
+    ).first()
+    if not student:
+        raise HTTPException(status_code=404, detail="Student not found")
+    _require_own_student(db, teacher, data.student_id)
 
     session = db.query(models.StudentSession).filter(
         models.StudentSession.id == data.session_id,
