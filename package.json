@@ -7,8 +7,12 @@
     "engines": {
         "vscode": "^1.85.0"
     },
-    "categories": ["Other"],
-    "activationEvents": ["onStartupFinished"],
+    "categories": [
+        "Other"
+    ],
+    "activationEvents": [
+        "onStartupFinished"
+    ],
     "main": "./extension.js",
     "contributes": {
         "viewsContainers": {
@@ -24,7 +28,7 @@
             "codeMonitor": [
                 {
                     "id": "codeMonitorFileSessions",
-                    "name": "File Scores"
+                    "name": "My Files"
                 }
             ]
         },
@@ -45,7 +49,18 @@
                 "command": "code-monitor.analyzeCode",
                 "title": "Code Monitor: Analyze Code (AI Detection)"
             }
-        ]
+        ],
+        "configuration": {
+            "title": "Code Monitor",
+            "properties": {
+                "codeMonitor.serverUrl": {
+                    "type": "string",
+                    "default": "https://screening-platform-tpku.onrender.com",
+                    "markdownDescription": "Backend server address, e.g. `http://127.0.0.1:8000` for a local test server.",
+                    "scope": "machine"
+                }
+            }
+        }
     },
     "scripts": {
         "lint": "eslint ."
