@@ -193,3 +193,11 @@ html body.ewu-auth #eye { color: var(--navy) !important; background: none !impor
 
 /* Form-field text colour: dark ink on the theme's light inputs. */
 input, textarea, select { color: #1a1a2e !important; }
+
+/* The auth-page override above (.ewu-auth .text-white -> #fff) is more
+   specific than the generic input/textarea/select rule and was winning on
+   login/register, turning form-field text white on the theme's light input
+   background. Target it precisely so it wins instead. */
+html body.ewu-auth input.text-white,
+html body.ewu-auth textarea.text-white,
+html body.ewu-auth select.text-white { color: #1a1a2e !important; }
