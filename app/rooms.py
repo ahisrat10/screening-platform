@@ -67,11 +67,83 @@ def _col(header_map: dict, key: str) -> Optional[int]:
     return None
 
 
+class _HTMLTableParser:
+    """Pulls the first <table>'s rows out of an HTML page (stdlib only).
+    Some university portals (e.g. EWU's) export "Excel" reports that are
+    actually an HTML page saved with a .xls extension — this reads those."""
+
+    def __init__(self):
+        self._parser = self._make_parser()
+        self.tables = []
+        self._in_table = 0
+        self._rows = None
+        self._row = None
+        self._cell_chunks = None
+        self._in_cell = False
+
+    def _make_parser(self):
+        from html.parser import HTMLParser
+        outer = self
+
+        class _P(HTMLParser):
+            def handle_starttag(self, tag, attrs):
+                if tag == "table":
+                    outer._in_table += 1
+                    if outer._in_table == 1:
+                        outer._rows = []
+                elif outer._in_table and tag == "tr":
+                    outer._row = []
+                elif outer._in_table and tag in ("td", "th"):
+                    outer._in_cell = True
+                    outer._cell_chunks = []
+
+            def handle_endtag(self, tag):
+                if tag == "table":
+                    if outer._in_table == 1 and outer._rows is not None:
+                        outer.tables.append(outer._rows)
+                    outer._in_table = max(0, outer._in_table - 1)
+                elif outer._in_table and tag == "tr" and outer._row is not None:
+                    outer._rows.append(outer._row)
+                    outer._row = None
+                elif outer._in_table and tag in ("td", "th") and outer._in_cell:
+                    text = "".join(outer._cell_chunks).strip()
+                    outer._row.append(text)
+                    outer._in_cell = False
+                    outer._cell_chunks = None
+
+            def handle_data(self, data):
+                if outer._in_cell:
+                    outer._cell_chunks.append(data)
+
+        return _P()
+
+    def feed(self, text: str):
+        self._parser.feed(text)
+
+
+def _looks_like_html(contents: bytes) -> bool:
+    head = contents[:1024].lstrip().lower()
+    return head.startswith(b"<!doctype html") or head.startswith(b"<html") or b"<table" in contents[:4096].lower()
+
+
 def parse_roster(filename: str, contents: bytes) -> list:
     """Return [(student_id, full_name, email)]. Only a student ID column is required."""
     name = (filename or "").lower()
     rows = []
-    if name.endswith(".csv"):
+    if _looks_like_html(contents):
+        # Some portals (e.g. EWU) export an HTML table saved with a .xls
+        # extension instead of a real binary workbook — read it as HTML
+        # regardless of what the extension claims.
+        text = contents.decode("utf-8", errors="replace")
+        parser = _HTMLTableParser()
+        try:
+            parser.feed(text)
+        except Exception:
+            raise HTTPException(status_code=400, detail="Could not read this file as a table")
+        if not parser.tables:
+            raise HTTPException(status_code=400, detail="No table found in this file")
+        data = max(parser.tables, key=len)
+    elif name.endswith(".csv"):
         import csv
         text = contents.decode("utf-8-sig", errors="replace")
         reader = csv.reader(io.StringIO(text))
@@ -84,7 +156,7 @@ def parse_roster(filename: str, contents: bytes) -> list:
             raise HTTPException(status_code=400, detail="Could not read the .xlsx file — is it a valid Excel file?")
         data = [list(r) for r in wb.active.iter_rows(values_only=True)]
     else:
-        raise HTTPException(status_code=400, detail="Upload a .xlsx or .csv file")
+        raise HTTPException(status_code=400, detail="Upload a .xlsx, .csv, or an exported .xls table file")
 
     if not data:
         raise HTTPException(status_code=400, detail="The file is empty")
