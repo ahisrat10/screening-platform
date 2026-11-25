@@ -318,6 +318,42 @@ def invite_student(class_id: int, data: InviteStudentRequest, db: Session = Depe
     return {"message": f"Invitation sent to {student.full_name or sid}", "success": True}
 
 
+@router.get("/teacher/classes/{class_id}/available-students")
+def available_students(class_id: int, db: Session = Depends(get_db),
+                       teacher=Depends(auth.get_teacher_user)):
+    c = _owned_class(db, teacher, class_id)
+    member_ids = db.query(models.ClassMember.student_id).filter(models.ClassMember.class_id == c.id)
+    students = db.query(models.User).filter(
+        models.User.role == "student",
+        models.User.is_active == True,  # noqa: E712
+        ~models.User.student_id.in_(member_ids),
+    ).order_by(models.User.full_name).all()
+    return [{"student_id": s.student_id, "full_name": s.full_name, "email": s.email} for s in students]
+
+
+class AddStudentsRequest(BaseModel):
+    student_ids: list[str]
+
+
+@router.post("/teacher/classes/{class_id}/add-students")
+def add_students(class_id: int, data: AddStudentsRequest, db: Session = Depends(get_db),
+                 teacher=Depends(auth.get_teacher_user)):
+    c = _owned_class(db, teacher, class_id)
+    existing = {sid for (sid,) in db.query(models.ClassMember.student_id).filter(
+        models.ClassMember.class_id == c.id).all()}
+    valid_ids = {s.student_id for s in db.query(models.User.student_id).filter(
+        models.User.student_id.in_(data.student_ids), models.User.role == "student").all()}
+    added = 0
+    for sid in data.student_ids:
+        if sid in existing or sid not in valid_ids:
+            continue
+        db.add(models.ClassMember(class_id=c.id, student_id=sid))
+        existing.add(sid)
+        added += 1
+    db.commit()
+    return {"added": added}
+
+
 @router.get("/teacher/classes/{class_id}/students")
 def class_students(class_id: int, db: Session = Depends(get_db), teacher=Depends(auth.get_teacher_user)):
     c = _owned_class(db, teacher, class_id)
