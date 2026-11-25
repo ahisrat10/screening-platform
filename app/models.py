@@ -17,6 +17,13 @@ BEHAVIORAL_FEATURE_COLUMNS = [
     "suspicion_score", "sudden_skill_jump", "total_session_seconds",
 ]
 
+# Added for the Code Monitor 1.0.6 extension signals (forbidden-app visits,
+# clipboard-hash-matched external pastes, suspicion-score decay ticks).
+BEHAVIORAL_FEATURE_COLUMNS_V2 = [
+    "forbidden_app_visits", "external_paste_count", "score_decay_applied",
+]
+BEHAVIORAL_FEATURE_COLUMNS = BEHAVIORAL_FEATURE_COLUMNS + BEHAVIORAL_FEATURE_COLUMNS_V2
+
 class User(Base):
     __tablename__ = "users"
 
@@ -296,6 +303,11 @@ class BehavioralData(Base):
 
     suspicion_score   = Column(Float, default=0)
     sudden_skill_jump = Column(Boolean, default=False)
+
+    # Code Monitor 1.0.6 extension signals.
+    forbidden_app_visits = Column(Integer, default=0)
+    external_paste_count = Column(Integer, default=0)
+    score_decay_applied  = Column(Integer, default=0)
 
     raw_events = Column(JSONB, default=list)
     created_at = Column(DateTime, server_default=func.now())

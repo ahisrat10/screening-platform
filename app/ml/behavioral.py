@@ -7,6 +7,7 @@ maps those onto the internal/legacy names used by the fusion model's feature
 set and the behavioral_data table, so both sides stay in sync. Legacy names
 are still accepted as a fallback.
 """
+import json
 
 
 def _num(raw: dict, *names, default=0.0) -> float:
@@ -53,7 +54,13 @@ def normalize_behavioral_signals(raw: dict) -> dict:
 
     # ── Mirror onto behavioral_data column names ──────────────────
     out["backspace_frequency"] = out["backspace_freq"]
-    out["backspace_count"] = int(_num(raw, "backspace_count", "backspace_frequency"))
+    # NOTE: raw is data.behavioral.model_dump() — a strongly-typed Pydantic
+    # model, so EVERY declared field is always present (0 if the extension
+    # didn't send it). raw.get("backspace_count") is therefore never None
+    # even when truly absent, so the old _num(raw, "backspace_count",
+    # "backspace_frequency") fallback chain never reached its second name.
+    # Read backspace_frequency directly instead.
+    out["backspace_count"] = int(_num(raw, "backspace_frequency"))
     out["tab_switch_count"] = out["tab_switches"]
     out["keys_per_minute"] = _num(raw, "keys_per_minute_avg", "keys_per_minute")
     out["keystroke_rhythm_std"] = out["keystroke_rhythm_stddev_ms"]
@@ -109,3 +116,85 @@ def behavioral_risk_score(sig: dict):
     total_w = sum(w for _, w in parts.values())
     score = sum(v * w for v, w in parts.values()) / total_w
     return round(score, 4), {k: round(v, 3) for k, (v, _) in parts.items()}
+
+
+# ── Aggregating discrete student_events into behavioral_data columns ───
+# The extension's /analyze/ai-detection payload only ever carried AGGREGATE
+# counters (total_pastes, total_tab_switches, ...). Several behavioral_data
+# columns were meant to hold finer-grained counts that the extension instead
+# reports as one-off events on /student/event — those columns were always 0.
+# This reads the matching events for the current session window and fills
+# them in. Columns this *can't* reconstruct from discrete events alone
+# (typing_ratio, code_deletion_ratio, time_per_line_ratio — true ratios, not
+# counts) are left as sent by the client.
+EVENT_COUNT_COLUMNS = {
+    "rapid_tab_switches":     "RAPID_TAB_SWITCHING",
+    "single_tab_switch":      "WINDOW_UNFOCUSED",
+    "window_unfocused_count": "WINDOW_UNFOCUSED",
+    "window_refocused_count": "WINDOW_REFOCUSED",
+    "long_absence_count":     "LONG_ABSENCE",
+    "fast_burst_count":       "FAST_BURST_TYPING",
+    "file_switches":          "FILE_SWITCHED",
+}
+
+
+def aggregate_event_counts(db, student_id: str, since) -> dict:
+    """Query student_events for `student_id` since the `since` datetime and
+    return the behavioral_data columns derivable from them. `db` is a
+    SQLAlchemy Session; import of models is local to dodge any import-order
+    issues between app.ml and the main app package."""
+    from .. import models
+
+    events = db.query(models.StudentEvent).filter(
+        models.StudentEvent.student_id == student_id,
+        models.StudentEvent.timestamp >= since,
+    ).all()
+
+    counts = {col: 0 for col in EVENT_COUNT_COLUMNS}
+    total_unfocused_seconds = 0.0
+    paste_sizes = []
+    paste_timestamps = []
+    tab_event_timestamps = []
+
+    for ev in events:
+        for col, event_type in EVENT_COUNT_COLUMNS.items():
+            if ev.event_type == event_type:
+                counts[col] += 1
+
+        if ev.event_type in ("WINDOW_REFOCUSED", "RAPID_TAB_SWITCHING", "WINDOW_UNFOCUSED"):
+            tab_event_timestamps.append(ev.timestamp)
+
+        if ev.event_type == "WINDOW_REFOCUSED":
+            try:
+                details = json.loads(ev.details) if ev.details else {}
+            except (TypeError, ValueError):
+                details = {}
+            try:
+                total_unfocused_seconds += float(details.get("away_duration_seconds") or 0)
+            except (TypeError, ValueError):
+                pass
+
+        if ev.event_type == "PASTE_DETECTED":
+            try:
+                details = json.loads(ev.details) if ev.details else {}
+            except (TypeError, ValueError):
+                details = {}
+            chars = details.get("chars_pasted")
+            if isinstance(chars, (int, float)):
+                paste_sizes.append(chars)
+            paste_timestamps.append(ev.timestamp)
+
+    # A paste is "after tab" if a tab-switch/refocus event landed in the 15s
+    # right before it — i.e. the student just came back from somewhere else.
+    paste_after_tab = 0
+    for pt in paste_timestamps:
+        if any(0 <= (pt - tt).total_seconds() <= 15 for tt in tab_event_timestamps):
+            paste_after_tab += 1
+
+    out = dict(counts)
+    out["total_unfocused_seconds"] = round(total_unfocused_seconds, 1)
+    out["large_paste_count"] = sum(1 for c in paste_sizes if c >= 50)
+    out["small_paste_count"] = sum(1 for c in paste_sizes if c < 50)
+    out["avg_paste_size"] = round(sum(paste_sizes) / len(paste_sizes), 1) if paste_sizes else 0.0
+    out["paste_after_tab"] = paste_after_tab
+    return out

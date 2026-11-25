@@ -388,6 +388,11 @@ class BehavioralSignals(BaseModel):
     sudden_skill_jump:       bool  = False
     total_session_seconds:   float = 0.0
 
+    # Code Monitor 1.0.6 extension signals.
+    forbidden_app_visits: int = 0
+    external_paste_count: int = 0
+    score_decay_applied:  int = 0
+
 class AIDetectionRequest(BaseModel):
     student_id:  Optional[str] = None
     code:        str

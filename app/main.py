@@ -2,7 +2,7 @@ from fastapi import FastAPI, Depends, HTTPException, WebSocket, WebSocketDisconn
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import func
 from sqlalchemy.orm import Session
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List, Optional
 from contextlib import asynccontextmanager
 import json, asyncio, logging
@@ -36,6 +36,9 @@ def _run_light_migrations(engine):
         "ALTER TABLE correction_memory ADD COLUMN IF NOT EXISTS agreed BOOLEAN",
         "ALTER TABLE code_snapshots ADD COLUMN IF NOT EXISTS ai_score_updated_at TIMESTAMP",
         "ALTER TABLE submissions ADD COLUMN IF NOT EXISTS filename VARCHAR",
+        "ALTER TABLE behavioral_data ADD COLUMN IF NOT EXISTS forbidden_app_visits INTEGER DEFAULT 0",
+        "ALTER TABLE behavioral_data ADD COLUMN IF NOT EXISTS external_paste_count INTEGER DEFAULT 0",
+        "ALTER TABLE behavioral_data ADD COLUMN IF NOT EXISTS score_decay_applied INTEGER DEFAULT 0",
     ]
     # AUTOCOMMIT + one connection per statement: a failed ALTER (e.g. on a
     # non-Postgres dev DB) must not abort the transaction for the rest.
@@ -982,6 +985,7 @@ def analyze_ai_detection(
     token_student_id: str     = Depends(get_student_from_token)
 ):
     from .ml.model_loader import predict_ai_detection
+    from .ml.behavioral import aggregate_event_counts
 
     if data.student_id and data.student_id != token_student_id:
         raise HTTPException(status_code=403, detail="Token does not match Student ID")
@@ -1019,12 +1023,24 @@ def analyze_ai_detection(
         models.ExamSession.is_active  == True
     ).order_by(models.ExamSession.session_start.desc()).first()
 
+    # Several behavioral_data columns are meant to hold finer-grained counts
+    # the extension only ever reports as discrete /student/event calls
+    # (RAPID_TAB_SWITCHING, WINDOW_UNFOCUSED, LONG_ABSENCE, FAST_BURST_TYPING,
+    # FILE_SWITCHED, PASTE_DETECTED), not in the AI-detection signals payload
+    # itself — fill them from the matching student_events for this session
+    # window, overriding the 0 defaults those columns would otherwise get.
+    session_ms = behavioral_dict.get("session_duration_ms") or 0
+    lookback = timedelta(milliseconds=session_ms) if session_ms else timedelta(hours=2)
+    event_counts = aggregate_event_counts(db, student_id, datetime.utcnow() - lookback)
+
     behavioral_row = models.BehavioralData(
         student_id      = student_id,
         exam_session_id = active_exam_session.id if active_exam_session else None,
         raw_events      = behavioral_dict,
-        **{col: normalized.get(col, 0) for col in models.BEHAVIORAL_FEATURE_COLUMNS}
+        **{col: normalized.get(col, 0) for col in models.BEHAVIORAL_FEATURE_COLUMNS},
     )
+    for col, value in event_counts.items():
+        setattr(behavioral_row, col, value)
     db.add(behavioral_row)
     db.flush()
 
