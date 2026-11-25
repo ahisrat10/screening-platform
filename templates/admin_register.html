@@ -5,8 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Admin Setup — Screening Platform</title>
 <script src="https://cdn.tailwindcss.com"></script>
+<link rel="icon" href="/assets/ewu-logo.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/assets/ewu.css">
 </head>
-<body class="bg-gray-950 min-h-screen flex items-center justify-center p-4">
+<body class="ewu-auth bg-gray-950 min-h-screen flex items-center justify-center p-4">
 <div class="w-full max-w-md">
 
   <div class="text-center mb-8">
@@ -99,7 +101,7 @@
 </div>
 
 <script>
-const API          = 'https://screening-platform-tpku.onrender.com';
+const API          = location.origin;
 const ADMIN_SECRET = 'SCREEN2024SECRET'; // Change this to your own secret!
 
 async function createAdmin() {
@@ -155,5 +157,6 @@ function showMessage(msg, type) {
   el.classList.remove('hidden');
 }
 </script>
+<script src="/assets/ewu.js"></script>
 </body>
 </html>

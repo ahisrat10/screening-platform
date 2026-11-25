@@ -14,6 +14,8 @@ from . import models, schemas, auth
 from .teacher import router as teacher_router, _require_visible as _teacher_require_visible
 from .export import router as export_router
 from .classes import router as classes_router, ai_detection_allowed
+from .rooms import router as rooms_router, student_classes
+from .portals import router as portals_router
 from .email_service import generate_otp, save_otp, send_otp_email, send_welcome_email
 
 models.Base.metadata.create_all(bind=engine)
@@ -125,6 +127,8 @@ app.add_middleware(
 app.include_router(teacher_router)
 app.include_router(export_router)
 app.include_router(classes_router)
+app.include_router(rooms_router)
+app.include_router(portals_router)
 
 logger = logging.getLogger("screening")
 
@@ -183,6 +187,14 @@ def register(data: schemas.RegisterRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="Email already registered")
 
     if data.role == "teacher":
+        # Teacher accounts need the sign-up code the admin handed out.
+        import hmac
+        from .rooms import _get_teacher_code
+        expected = _get_teacher_code(db)
+        if not expected:
+            raise HTTPException(status_code=403, detail="Teacher sign-up is not open. Ask the admin for access.")
+        if not hmac.compare_digest(expected.encode(), (data.teacher_code or "").strip().encode()):
+            raise HTTPException(status_code=403, detail="Invalid teacher code")
         # Teachers have no university ID: derive a unique login ID from the email.
         import re
         base = "teacher-" + (re.sub(r"[^a-z0-9]+", "-", data.email.split("@")[0].lower()).strip("-") or "user")
@@ -254,6 +266,30 @@ def register_admin(
     }
 
 
+
+def _extension_class_gate(db: Session, user, client: Optional[str]):
+    """Returns the student's classes. The VS Code extension (client="extension")
+    may only be used by a student who is on a class roster AND whose teacher
+    has started the lab; the classes returned then are the ones with a live lab."""
+    if user.role != "student":
+        return None
+    classes = student_classes(db, user.student_id)
+    if client != "extension":
+        return classes
+    if not classes:
+        raise HTTPException(status_code=403, detail="You are not registered in any class.")
+    live_ids = {r[0] for r in db.query(models.LabSession.class_id).filter(
+        models.LabSession.class_id.in_([c["class_id"] for c in classes]),
+        models.LabSession.is_active == True,          # noqa: E712
+    ).all()}
+    live = [c for c in classes if c["class_id"] in live_ids]
+    if not live:
+        raise HTTPException(
+            status_code=403,
+            detail="You are not registered in an active lab. Your teacher has not started the lab yet.")
+    return live
+
+
 @app.post("/auth/login", response_model=schemas.TokenResponse)
 def login(data: schemas.LoginRequest, db: Session = Depends(get_db)):
     user = db.query(models.User).filter(
@@ -305,13 +341,15 @@ def login(data: schemas.LoginRequest, db: Session = Depends(get_db)):
             detail=f"This is a {user.role} account. Switch the toggle to \"{user.role.title()}\" and try again."
         )
 
+    classes = _extension_class_gate(db, user, data.client)
     token = auth.create_token({"sub": user.student_id, "role": user.role})
     return {
         "access_token": token,
         "token_type":   "bearer",
         "student_id":   user.student_id,
         "full_name":    user.full_name,
-        "role":         user.role
+        "role":         user.role,
+        "classes":      classes,
     }
 
 
@@ -330,6 +368,10 @@ def guest_login(data: schemas.GuestLoginRequest, db: Session = Depends(get_db)):
     ).first()
 
     if not user:
+        # Accounts are created from a teacher's class list, so an ID that does
+        # not exist is simply not on any list.
+        if data.client == "extension":
+            raise HTTPException(status_code=403, detail="You are not registered in any class.")
         raise HTTPException(status_code=401, detail="Student ID not found")
 
     if user.role not in ("student",):
@@ -338,6 +380,7 @@ def guest_login(data: schemas.GuestLoginRequest, db: Session = Depends(get_db)):
     if not user.is_active:
         raise HTTPException(status_code=403, detail="This account has been deactivated.")
 
+    classes = _extension_class_gate(db, user, data.client)
     token = auth.create_token({"sub": user.student_id, "role": user.role})
     return {
         "access_token": token,
@@ -345,6 +388,7 @@ def guest_login(data: schemas.GuestLoginRequest, db: Session = Depends(get_db)):
         "student_id":   user.student_id,
         "full_name":    user.full_name,
         "role":         user.role,
+        "classes":      classes,
     }
 
 # In-process limiter so a 6-digit OTP can't be brute-forced.
@@ -1052,18 +1096,10 @@ def _classical_and_transformer_scores(db: Session, student_id: str, filename: Op
     return classical, transformer
 
 
-@app.get("/teacher/student/{student_id}/files")
-def get_student_file_scores(
-    student_id: str,
-    current_user=Depends(auth.get_teacher_user),
-    db: Session = Depends(get_db),
-):
-    """Per-file breakdown for the teacher dashboard's expandable student rows
-    (Issue 2: multiple files per student). Lists every filename seen for this
-    student across either CodeSnapshot or Submission rows, each with its own
-    classical + transformer score pair."""
-    _teacher_require_visible(db, current_user, student_id)
-
+def _student_file_scores(db: Session, student_id: str):
+    """Per-file scores plus the student's average across files.
+    Each file gets classical, transformer and `combined` (mean of whichever are
+    available). `average` is the mean of each across the files that have it."""
     snap_filenames = {
         row[0] for row in db.query(models.CodeSnapshot.filename)
         .filter(models.CodeSnapshot.student_id == student_id, models.CodeSnapshot.filename.isnot(None))
@@ -1074,17 +1110,41 @@ def get_student_file_scores(
         .filter(models.Submission.student_id == student_id, models.Submission.filename.isnot(None))
         .distinct()
     }
-    filenames = sorted(snap_filenames | sub_filenames)
-
     files = []
-    for filename in filenames:
+    for filename in sorted(snap_filenames | sub_filenames):
         classical, transformer = _classical_and_transformer_scores(db, student_id, filename)
+        parts = [v for v in (classical.get("score"), transformer.get("score")) if v is not None]
         files.append({
             "filename":    filename,
             "classical":   classical,
             "transformer": transformer,
+            "combined":    round(sum(parts) / len(parts), 1) if parts else None,
         })
-    return {"files": files}
+
+    def _avg(values):
+        values = [v for v in values if v is not None]
+        return round(sum(values) / len(values), 1) if values else None
+
+    average = {
+        "classical":   _avg(f["classical"].get("score") for f in files),
+        "transformer": _avg(f["transformer"].get("score") for f in files),
+        "combined":    _avg(f["combined"] for f in files),
+        "file_count":  len(files),
+    }
+    return files, average
+
+
+@app.get("/teacher/student/{student_id}/files")
+def get_student_file_scores(
+    student_id: str,
+    current_user=Depends(auth.get_teacher_user),
+    db: Session = Depends(get_db),
+):
+    """Per-file breakdown for the teacher dashboard's expandable student rows
+    (Issue 2: multiple files per student), plus the student's average."""
+    _teacher_require_visible(db, current_user, student_id)
+    files, average = _student_file_scores(db, student_id)
+    return {"files": files, "average": average}
 
 
 @app.get("/teacher/student/{student_id}/ai-scores")
@@ -1590,10 +1650,9 @@ from fastapi.responses import HTMLResponse
 TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
 
 PAGES = {
-    "/login":          "login.html",
     "/register":       "register.html",
     "/student-dashboard": "student_dashboard.html",
-    "/admin-dashboard":   "admin_dashboard.html",
+    "/admin-dashboard":   "admin.html",
     "/dashboard":      "dashboard.html",
     "/admin":          "admin.html",
     "/admin/register": "admin_register.html",
@@ -1621,9 +1680,7 @@ for _route, _file in PAGES.items():
     app.add_api_route(_route, _make_page(_file), methods=["GET"],
                       response_class=HTMLResponse, include_in_schema=False)
 
-# GET + HEAD (health checks / uptime pingers from Render etc. use HEAD)
-app.add_api_route("/", _make_page("login.html"), methods=["GET", "HEAD"],
-                  response_class=HTMLResponse, include_in_schema=False)
+# "/" (landing page, GET + HEAD for uptime pingers) is served by portals.py
 
 
 @app.api_route("/health", methods=["GET", "HEAD"])

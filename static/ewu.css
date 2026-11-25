@@ -1,0 +1,192 @@
+/* EWU Screening Platform — formal institutional theme.
+   Loaded after the Tailwind CDN script on every page. The pages are written
+   with dark utility classes; this file re-skins them as a light, flat,
+   university-style interface (navy + EWU orange) so page logic is untouched.
+
+   Palette
+     navy       #23336A   header, primary buttons
+     navy-deep  #172250   header gradient end, auth background
+     orange     #FF8C00   single accent rule under the header
+     ink        #14213D   body text
+     slate      #475569   secondary text
+     paper      #F4F6FA   page background
+     line       #D6DDE9   borders
+*/
+@import url('https://fonts.googleapis.com/css2?family=EB+Garamond:wght@500;600;700&family=Source+Sans+3:wght@400;500;600;700&display=swap');
+
+:root {
+  --navy: #23336A;
+  --navy-deep: #172250;
+  --orange: #FF8C00;
+  --ink: #14213D;
+  --slate: #475569;
+  --paper: #F4F6FA;
+  --line: #D6DDE9;
+  --serif: 'EB Garamond', Georgia, 'Times New Roman', serif;
+  --sans: 'Source Sans 3', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+}
+
+html body {
+  background: var(--paper) !important;
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 15px;
+  line-height: 1.5;
+}
+html body.bg-gray-950 { background-color: var(--paper) !important; }
+
+html body h1, html body h2, html body h3 { font-family: var(--serif); letter-spacing: 0; }
+html body h1 { font-weight: 700; }
+html body h2, html body h3 { font-weight: 600; }
+
+/* ── Header: navy bar, one orange rule ──────────────────────────────────── */
+html body header,
+html body .sticky.bg-gray-900,
+html body .ewu-header {
+  background: linear-gradient(180deg, var(--navy) 0%, var(--navy-deep) 100%) !important;
+  border: 0 !important;
+  border-bottom: 3px solid var(--orange) !important;
+  box-shadow: 0 2px 6px rgba(16, 24, 40, .18) !important;
+  border-radius: 0 !important;
+}
+html body header .text-white, html body .sticky.bg-gray-900 .text-white, html body .ewu-header .text-white { color: #fff !important; }
+html body header [class*="text-gray-"], html body .sticky.bg-gray-900 [class*="text-gray-"], html body .ewu-header [class*="text-gray-"] { color: #C9D3F0 !important; }
+html body header a:hover, html body .sticky.bg-gray-900 a:hover { background: rgba(255,255,255,.12) !important; color: #fff !important; }
+
+/* status pills that live inside the navy header */
+html body header [class*="bg-gray-8"], html body header [class*="bg-green-9"], html body header [class*="bg-red-9"], html body header [class*="bg-yellow-9"],
+html body .sticky.bg-gray-900 [class*="bg-gray-8"], html body .sticky.bg-gray-900 [class*="bg-green-9"], html body .sticky.bg-gray-900 [class*="bg-red-9"], html body .sticky.bg-gray-900 [class*="bg-yellow-9"],
+html body .ewu-header [class*="bg-gray-8"] { background: rgba(255,255,255,.14) !important; border-color: rgba(255,255,255,.25) !important; }
+html body header [class*="bg-gray-8"], html body header [class*="bg-gray-8"] *,
+html body header [class*="bg-green-9"], html body header [class*="bg-green-9"] *,
+html body header [class*="bg-red-9"], html body header [class*="bg-red-9"] *,
+html body header [class*="bg-yellow-9"], html body header [class*="bg-yellow-9"] *,
+html body .sticky.bg-gray-900 [class*="bg-gray-8"], html body .sticky.bg-gray-900 [class*="bg-gray-8"] *,
+html body .sticky.bg-gray-900 [class*="bg-green-9"], html body .sticky.bg-gray-900 [class*="bg-green-9"] *,
+html body .sticky.bg-gray-900 [class*="bg-red-9"], html body .sticky.bg-gray-900 [class*="bg-red-9"] * { color: #fff !important; }
+
+.ewu-logo {
+  height: 44px; width: auto; padding: 4px 8px; border-radius: 6px; background: #fff;
+  box-shadow: none; transform: none; transition: none;
+}
+
+/* ── Surfaces ───────────────────────────────────────────────────────────── */
+html body .bg-gray-900 {
+  background: #fff !important;
+  border: 1px solid var(--line) !important;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, .06) !important;
+}
+html body .bg-gray-800, html body [class*="bg-gray-800/"] { background: #EEF2F8 !important; border-color: var(--line) !important; }
+html body .bg-gray-950, html body [class*="bg-gray-950/"] { background: #F5F7FB !important; }
+html body .bg-gray-700 { background: #E3E9F3 !important; }
+html body .bg-gray-600 { background: #CBD5E1 !important; }
+html body .bg-gray-500 { background: #94A3B8 !important; }
+html body [class*="border-gray-"] { border-color: var(--line) !important; }
+html body .divide-gray-800 > :not([hidden]) ~ :not([hidden]),
+html body .divide-gray-900 > :not([hidden]) ~ :not([hidden]) { border-color: #E3E8F1 !important; }
+html body .hover\:bg-gray-800:hover, html body [class*="hover\:bg-gray-800/"]:hover { background: #EAF0FA !important; }
+html body .hover\:bg-gray-700:hover, html body .hover\:bg-gray-600:hover { background: #D5DEEE !important; }
+html body .rounded-xl, html body .rounded-2xl { border-radius: 10px; }
+html body .rounded-lg { border-radius: 6px; }
+
+/* ── Text ───────────────────────────────────────────────────────────────── */
+html body .text-white, html body [class*="text-white/"] { color: var(--ink) !important; }
+html body .text-gray-200, html body.text-gray-200 { color: #1F2D46 !important; }
+html body .text-gray-300 { color: #33415C !important; }
+html body .text-gray-400 { color: var(--slate) !important; }
+html body .text-gray-500 { color: #5B6A80 !important; }
+html body .text-gray-600 { color: #6B7A90 !important; }
+html body .hover\:text-white:hover, html body .hover\:text-gray-300:hover, html body .hover\:text-blue-300:hover { color: var(--navy) !important; }
+
+html body [class*="text-red-"]    { color: #B91C1C !important; }
+html body [class*="text-green-"]  { color: #15803D !important; }
+html body [class*="text-yellow-"] { color: #92400E !important; }
+html body [class*="text-orange-"] { color: #B45309 !important; }
+html body [class*="text-blue-"]   { color: #1D4ED8 !important; }
+html body [class*="text-purple-"] { color: #6D28D9 !important; }
+
+/* tinted status chips (were dark-on-dark) */
+html body [class*="bg-red-9"]    { background: #FEE2E2 !important; }
+html body [class*="bg-green-9"]  { background: #DCFCE7 !important; }
+html body [class*="bg-yellow-9"] { background: #FEF3C7 !important; }
+html body [class*="bg-blue-9"], html body [class*="bg-blue-600/"] { background: #DBEAFE !important; }
+html body [class*="bg-purple-9"] { background: #EDE9FE !important; }
+html body [class*="border-red-"]    { border-color: #FCA5A5 !important; }
+html body [class*="border-green-"]  { border-color: #86EFAC !important; }
+html body [class*="border-yellow-"] { border-color: #FCD34D !important; }
+html body [class*="border-blue-"]   { border-color: #93C5FD !important; }
+html body [class*="border-purple-"] { border-color: #C4B5FD !important; }
+
+/* ── Buttons: flat, solid, white label ──────────────────────────────────── */
+html body button.bg-blue-600, html body a.bg-blue-600, html body button.bg-blue-700, html body button.bg-blue-500 {
+  background: var(--navy) !important; color: #fff !important; box-shadow: none !important;
+}
+html body button.bg-blue-600:hover, html body a.bg-blue-600:hover, html body button.hover\:bg-blue-700:hover,
+html body button.hover\:bg-blue-600:hover { background: #1A2756 !important; }
+html body button.bg-green-600, html body button.bg-green-700, html body button.bg-green-500 { background: #15803D !important; color: #fff !important; box-shadow: none !important; }
+html body button.bg-green-600:hover, html body button.hover\:bg-green-700:hover, html body button.hover\:bg-green-800:hover { background: #116A32 !important; }
+html body button.bg-red-600, html body button.bg-red-700, html body button.bg-red-800 { background: #B91C1C !important; color: #fff !important; box-shadow: none !important; }
+html body button.bg-red-600:hover, html body button.hover\:bg-red-700:hover, html body button.hover\:bg-red-600:hover, html body button.hover\:bg-red-800:hover { background: #991B1B !important; }
+html body button.bg-purple-600, html body button.bg-purple-700 { background: #6D28D9 !important; color: #fff !important; box-shadow: none !important; }
+html body button.bg-yellow-600, html body button.bg-yellow-700 { background: #B45309 !important; color: #fff !important; box-shadow: none !important; }
+html body button.bg-gray-800, html body button.bg-gray-700 { background: #E3E9F3 !important; color: var(--navy) !important; box-shadow: none !important; border: 1px solid var(--line) !important; }
+html body button.bg-gray-800:hover, html body button.bg-gray-700:hover, html body button.hover\:bg-gray-600:hover { background: #D5DEEE !important; }
+html body button, html body a { transition: background-color .15s, color .15s, border-color .15s; cursor: pointer; }
+html body button:disabled { cursor: not-allowed; }
+
+html body :focus-visible { outline: 2px solid var(--orange) !important; outline-offset: 2px; }
+
+/* ── Inputs ─────────────────────────────────────────────────────────────── */
+html body input, html body select, html body textarea,
+html body input[class], html body select[class], html body textarea[class] {
+  background: #fff !important; border: 1px solid #B7C2D6 !important; color: var(--ink) !important;
+  box-shadow: none; border-radius: 6px;
+}
+html body input::placeholder, html body textarea::placeholder { color: #7A889D !important; }
+html body input:focus, html body select:focus, html body textarea:focus {
+  outline: none; border-color: var(--navy) !important; box-shadow: 0 0 0 3px rgba(35, 51, 106, .18);
+}
+html body input[type="checkbox"], html body input[type="radio"] { accent-color: var(--navy); }
+
+/* ── Tables ─────────────────────────────────────────────────────────────── */
+html body table thead { background: #EDF1F8 !important; }
+html body table thead th { color: #33415C !important; font-weight: 600; }
+html body tbody tr:hover { background: #F3F7FD; }
+html body pre, html body code { color: #14213D; }
+
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-track { background: #EEF2F8; }
+*::-webkit-scrollbar-thumb { background: #B7C2D6; border-radius: 6px; }
+
+/* modal overlay */
+html body [class*="bg-black/"] { background: rgba(15, 23, 42, .55) !important; }
+
+/* ── Small helpers ──────────────────────────────────────────────────────── */
+.ewu-tilt, .ewu-tilt:hover { transform: none !important; }
+.ewu-stat { font-family: var(--serif); font-size: 2.2rem; font-weight: 700; color: var(--navy); line-height: 1.1; }
+.ewu-chip { display:inline-flex; align-items:center; gap:6px; padding:2px 10px; border-radius:999px; font-size:12px; background:#FFF4E0; border:1px solid #F5C77E; color:#8A4B00; }
+.ewu-orb { display: none; }
+
+/* ══ Sign-in and portal-choice pages (body.ewu-auth) ═══════════════════════ */
+html body.ewu-auth { background: linear-gradient(180deg, var(--navy-deep) 0, var(--navy) 100%) fixed !important; }
+.ewu-stage { perspective: none; }
+.ewu-card {
+  position: relative; background: #fff; border: 1px solid var(--line); border-top: 4px solid var(--orange);
+  border-radius: 8px; padding: 28px; box-shadow: 0 12px 32px rgba(8, 14, 40, .35);
+}
+.ewu-card::after { display: none; }
+.ewu-card .text-white, .ewu-card h2, .ewu-card h3 { color: var(--ink) !important; }
+.ewu-card [class*="text-blue-"] { color: var(--slate) !important; }
+.ewu-card [class*="text-orange-"], .ewu-card a { color: #B45309 !important; }
+.ewu-card label { color: #1F2D46 !important; }
+.ewu-card a:hover { text-decoration: underline; }
+html body.ewu-auth .text-white { color: #fff !important; }
+html body.ewu-auth .ewu-card .text-white { color: var(--ink) !important; }
+html body.ewu-auth [class*="text-blue-"] { color: #C9D3F0 !important; }
+html body.ewu-auth .ewu-card [class*="text-blue-"] { color: var(--slate) !important; }
+html body.ewu-auth .ewu-card button.bg-blue-600 { background: var(--navy) !important; color: #fff !important; }
+html body.ewu-auth #eye { color: var(--navy) !important; background: none !important; border: 0 !important; }
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; animation: none !important; }
+}

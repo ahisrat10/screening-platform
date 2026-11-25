@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>My Classes — Screening Platform</title>
 <script src="https://cdn.tailwindcss.com"></script>
+<link rel="icon" href="/assets/ewu-logo.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/assets/ewu.css">
 </head>
 <body class="bg-gray-950 min-h-screen text-gray-200">
 
@@ -12,7 +14,7 @@
 <header class="bg-gray-900 border-b border-gray-800 px-5 py-3 sticky top-0 z-30">
   <div class="max-w-5xl mx-auto flex justify-between items-center gap-3">
     <div class="flex items-center gap-3">
-      <span class="text-2xl">🎓</span>
+      <a href="/"><img src="/assets/ewu-logo.svg" alt="EWU" class="ewu-logo"></a>
       <div>
         <h1 class="text-white font-bold leading-tight">My Classes</h1>
         <p id="who" class="text-gray-500 text-xs"></p>
@@ -91,10 +93,29 @@
       </table>
     </div>
   </section>
+  <!-- My code -->
+  <section class="bg-gray-900 border border-gray-800 rounded-2xl p-5">
+    <div class="flex items-center justify-between mb-1 flex-wrap gap-2">
+      <h2 class="text-white font-semibold">My code</h2>
+      <span id="code_count" class="text-sm text-gray-400"></span>
+    </div>
+    <p class="text-gray-500 text-xs mb-4">Every file you wrote, with the date and the course it was written for.</p>
+    <div id="code_list" class="space-y-3"><p class="text-gray-500 text-sm">Loading…</p></div>
+  </section>
+
+  <!-- My feedback -->
+  <section class="bg-gray-900 border border-gray-800 rounded-2xl p-5">
+    <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
+      <h2 class="text-white font-semibold">My feedback</h2>
+      <span id="fb_avg" class="text-sm text-gray-400"></span>
+    </div>
+    <div id="fb_files" class="mb-4 space-y-1 text-sm"></div>
+    <div id="fb_list" class="space-y-2"><p class="text-gray-500 text-sm">Loading…</p></div>
+  </section>
 </main>
 
 <script>
-const API   = 'https://screening-platform-tpku.onrender.com';
+const API   = location.origin;
 const token = localStorage.getItem('token');
 const role  = localStorage.getItem('role');
 
@@ -103,7 +124,7 @@ const joinMatch = window.location.pathname.match(/^\/join\/([^\/]+)$/);
 if (joinMatch) {
   try { localStorage.setItem('pending_invite', decodeURIComponent(joinMatch[1])); } catch (e) {}
 }
-if (!token) { window.location.href = '/'; }
+if (!token) { window.location.href = '/student/login'; }
 else if (role === 'teacher') { window.location.href = '/teacher'; }
 else if (role === 'admin')   { window.location.href = '/admin'; }
 
@@ -125,7 +146,7 @@ async function api(path, opts = {}) {
     ...opts,
     headers: { 'Authorization': `Bearer ${token}`, ...(opts.body ? { 'Content-Type': 'application/json' } : {}) },
   });
-  if (res.status === 401) { localStorage.clear(); window.location.href = '/'; throw new Error('Session expired'); }
+  if (res.status === 401) { localStorage.clear(); window.location.href = '/student/login'; throw new Error('Session expired'); }
   const data = await res.json().catch(() => null);
   if (!res.ok) { const e = new Error(errorText(data, `Request failed (${res.status})`)); e.status = res.status; throw e; }
   return data;
@@ -140,10 +161,10 @@ function banner(msg, kind) {
 }
 function logout() {
   banner('👋 Logged out', 'ok');
-  setTimeout(() => { localStorage.clear(); window.location.href = '/'; }, 2000);
+  setTimeout(() => { localStorage.clear(); window.location.href = '/student/login'; }, 2000);
 }
 
-const PALETTE = ['#2563eb', '#7c3aed', '#0d9488', '#d97706', '#db2777', '#4f46e5', '#059669', '#dc2626'];
+const PALETTE = ['#CFE3F8', '#C4DCF5', '#D6E8FA', '#BDD8F3'];
 function colorFor(s) { let h = 0; for (const c of String(s)) h = (h * 31 + c.charCodeAt(0)) >>> 0; return PALETTE[h % PALETTE.length]; }
 
 // ── classes ────────────────────────────────────────────────────
@@ -265,14 +286,77 @@ async function loadHistory() {
 }
 
 // ── boot ───────────────────────────────────────────────────────
+async function loadFeedback() {
+  const pc = v => v != null ? `${v}%` : '—';
+  try {
+    const d = await api('/student/my-feedback');
+    document.getElementById('fb_avg').textContent = d.average && d.average.combined != null
+      ? `Average AI likelihood: ${d.average.combined}% across ${d.average.file_count} file(s)` : '';
+    document.getElementById('fb_files').innerHTML = (d.files || []).map(f =>
+      `<div class="flex justify-between text-gray-300"><span class="truncate pr-3">${esc(f.filename)}</span><span class="text-gray-400 shrink-0">${pc(f.combined)}</span></div>`).join('');
+    const list = d.feedback || [];
+    document.getElementById('fb_list').innerHTML = list.length ? list.map(x => `
+      <div class="bg-gray-950 border border-gray-800 rounded-lg p-3">
+        <div class="flex items-center justify-between text-xs text-gray-500 mb-1">
+          <span>${esc(x.teacher || 'Teacher')}${x.filename ? ' · ' + esc(x.filename) : ''}${x.verdict ? ' · ' + esc(x.verdict) : ''}</span>
+          <span>${x.at ? new Date(x.at).toLocaleString() : ''}</span>
+        </div>
+        <p class="text-gray-200 text-sm">${x.text ? esc(x.text) : '<span class="text-gray-500">No written note.</span>'}</p>
+      </div>`).join('') : '<p class="text-gray-500 text-sm">No feedback from your teacher yet.</p>';
+  } catch (e) {
+    document.getElementById('fb_list').innerHTML = `<p class="text-red-400 text-sm">${esc(e.message)}</p>`;
+  }
+}
+
+async function loadMyCodes() {
+  const box = document.getElementById('code_list');
+  try {
+    const d = await api('/student/my-codes');
+    const files = d.files || [];
+    document.getElementById('code_count').textContent = files.length ? `${files.length} file${files.length === 1 ? '' : 's'}` : '';
+    if (!files.length) { box.innerHTML = '<p class="text-gray-500 text-sm">No code yet. Files you write in VS Code during a lab show up here.</p>'; return; }
+    box.innerHTML = files.map((f, i) => {
+      const when = f.date ? new Date(f.date) : null;
+      const course = f.course ? `${esc(f.course)}${f.section ? ' · Sec ' + esc(f.section) : ''}` : 'Course not recorded';
+      return `<article class="bg-gray-800/60 border border-gray-700 rounded-xl p-4">
+        <div class="flex items-start justify-between gap-3 flex-wrap">
+          <div class="min-w-0">
+            <p class="text-white font-medium truncate">${esc(f.filename)}</p>
+            <div class="flex flex-wrap gap-2 mt-2 text-xs">
+              <span class="ewu-chip">📚 ${course}</span>
+              <span class="ewu-chip" style="background:rgba(120,150,255,.12);border-color:rgba(120,150,255,.35);color:#b9c8ff">📅 ${when ? when.toLocaleDateString(undefined, {year:'numeric', month:'short', day:'numeric'}) + ' · ' + when.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : '—'}</span>
+              ${f.language ? `<span class="ewu-chip" style="background:rgba(255,255,255,.06);border-color:var(--edge);color:#cbd5f5">${esc(f.language)}</span>` : ''}
+              <span class="ewu-chip" style="background:rgba(255,255,255,.06);border-color:var(--edge);color:#cbd5f5">${f.lines} lines</span>
+            </div>
+          </div>
+          <div class="text-right shrink-0">
+            <p class="text-xs text-gray-400">AI likelihood</p>
+            <p class="ewu-stat" style="font-size:1.5rem">${f.ai_percent != null ? f.ai_percent + '%' : '—'}</p>
+          </div>
+        </div>
+        <button type="button" data-i="${i}" class="view_code mt-3 text-sm text-blue-300 hover:text-white">View code ▾</button>
+        <pre id="code_${i}" class="hidden mt-2 bg-gray-950 border border-gray-800 rounded-lg p-3 text-xs text-gray-200 overflow-auto max-h-80"></pre>
+      </article>`;
+    }).join('');
+    box.querySelectorAll('.view_code').forEach(b => b.addEventListener('click', () => {
+      const pre = document.getElementById('code_' + b.dataset.i);
+      if (pre.classList.contains('hidden')) { pre.textContent = files[+b.dataset.i].code || ''; pre.classList.remove('hidden'); b.textContent = 'Hide code ▴'; }
+      else { pre.classList.add('hidden'); b.textContent = 'View code ▾'; }
+    }));
+  } catch (e) {
+    box.innerHTML = `<p class="text-red-400 text-sm">${esc(e.message)}</p>`;
+  }
+}
+
 (async function init() {
   if (!token || role !== 'student') return;
   await handlePendingInvite();
-  const results = await Promise.allSettled([loadClasses(), loadInvitations(), loadHistory()]);
+  const results = await Promise.allSettled([loadClasses(), loadInvitations(), loadHistory(), loadMyCodes(), loadFeedback()]);
   const failed = results.find(r => r.status === 'rejected');
   if (failed) banner(failed.reason.message, 'err');
   setInterval(() => { if (!document.hidden) loadInvitations().catch(() => {}); }, 30000);
 })();
 </script>
+<script src="/assets/ewu.js"></script>
 </body>
 </html>

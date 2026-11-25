@@ -8,6 +8,7 @@ Admin side:    /admin/users..., /admin/db-stats
 """
 import csv
 import io
+import logging
 import re
 import secrets
 import time
@@ -323,7 +324,16 @@ def end_lab(class_id: int, db: Session = Depends(get_db), teacher=Depends(auth.g
     lab.is_active = False
     lab.ended_at = func.now()      # DB clock, same as started_at
     db.commit()
-    return {"message": "Lab ended", "success": True}
+    # Save this lab's dataset (e.g. 2026-6-26_cse438.json) into the class.
+    dataset = None
+    try:
+        from .rooms import save_dataset_for_lab
+        dataset = save_dataset_for_lab(db, c, lab, teacher.student_id)
+    except Exception:
+        db.rollback()
+        logging.getLogger("screening").warning("Dataset save failed for class %s", c.id, exc_info=True)
+    return {"message": "Lab ended", "success": True,
+            "dataset": {"id": dataset.id, "filename": dataset.filename} if dataset else None}
 
 
 # ══════════════════════════════════════════════════════════════
@@ -554,6 +564,35 @@ def admin_users(role: Optional[str] = None, q: Optional[str] = None,
         "created_at": str(u.created_at) if u.created_at else None,
         "last_active": str(active[u.student_id]) if u.student_id in active else None,
     } for u in query.order_by(models.User.created_at.desc(), models.User.id.desc()).all()]
+
+
+class AdminSetPassword(BaseModel):
+    new_password: str
+
+    @field_validator("new_password")
+    @classmethod
+    def _len(cls, v):
+        if len(v) < 6:
+            raise ValueError("Password must be at least 6 characters")
+        if len(v.encode("utf-8")) > 72:
+            raise ValueError("Password must be 72 bytes or fewer")
+        return v
+
+
+@router.put("/admin/users/{user_id}/password")
+def admin_set_password(user_id: str, data: AdminSetPassword,
+                       db: Session = Depends(get_db), admin=Depends(auth.get_admin_user)):
+    """Admin sets a new password for any student, teacher or admin account.
+    Also clears a lockout from too many wrong attempts."""
+    u = db.query(models.User).filter(models.User.student_id == user_id).first()
+    if not u:
+        raise HTTPException(status_code=404, detail="User not found")
+    u.password_hash = auth.hash_password(data.new_password)
+    u.failed_attempts = 0
+    u.locked_until = None
+    db.commit()
+    logging.getLogger("screening").info("Admin %s changed the password of %s", admin.student_id, user_id)
+    return {"message": f"Password changed for {u.full_name or user_id}", "success": True}
 
 
 def _csv_safe(v) -> str:

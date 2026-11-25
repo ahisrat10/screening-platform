@@ -5,8 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Reset password — Screening Platform</title>
 <script src="https://cdn.tailwindcss.com"></script>
+<link rel="icon" href="/assets/ewu-logo.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/assets/ewu.css">
 </head>
-<body class="bg-gray-950 min-h-screen flex items-center justify-center p-4">
+<body class="ewu-auth bg-gray-950 min-h-screen flex items-center justify-center p-4">
 <div class="w-full max-w-md">
 
   <div class="text-center mb-7">
@@ -97,7 +99,7 @@
 </div>
 
 <script>
-const API = 'https://screening-platform-tpku.onrender.com';
+const API = location.origin;
 let step = 1, email = '', otp = '', resendTimer = null;
 
 const TITLES = {
@@ -259,5 +261,6 @@ document.getElementById('form3').addEventListener('submit', async (e) => {
 
 setStep(1);
 </script>
+<script src="/assets/ewu.js"></script>
 </body>
 </html>

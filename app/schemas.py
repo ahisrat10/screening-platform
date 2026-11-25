@@ -12,6 +12,9 @@ class RegisterRequest(BaseModel):
     password:   str
     confirm_password: str
     role:       str = "student"          # "student" | "teacher"
+    teacher_code: Optional[str] = None     # required when role == "teacher" (given by the admin)
+    teacher_code: Optional[str] = None     # required when role == "teacher" (given by the admin)
+    teacher_code: Optional[str] = None     # required when role == "teacher" (given by the admin)
 
     @field_validator('role')
     def validate_role(cls, v):
@@ -81,9 +84,11 @@ class LoginRequest(BaseModel):
     student_id: str
     password:   str
     role:       Optional[str] = None   # UI toggle; checked after the password
+    client:     Optional[str] = None   # "extension" = VS Code monitor (must be on a class roster)
 
 class GuestLoginRequest(BaseModel):
     student_id: str
+    client:     Optional[str] = None
 
 class ForgotPasswordRequest(BaseModel):
     # Email is enough; student_id is still accepted (older clients send both).
@@ -138,6 +143,7 @@ class TokenResponse(BaseModel):
     student_id:   str
     full_name:    str
     role:         str
+    classes:      Optional[list] = None      # classes the student is registered in
 
 class UserResponse(BaseModel):
     student_id: str

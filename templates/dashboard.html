@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Dashboard — Screening Platform</title>
 <script src="https://cdn.tailwindcss.com"></script>
+<link rel="icon" href="/assets/ewu-logo.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/assets/ewu.css">
 </head>
 <body class="bg-gray-950 min-h-screen">
 
@@ -12,7 +14,7 @@
 <div class="bg-gray-900 border-b border-gray-800 px-6 py-4">
   <div class="max-w-3xl mx-auto flex justify-between items-center">
     <div>
-      <h1 class="text-xl font-bold text-white">🎓 Student Dashboard</h1>
+      <div class="flex items-center gap-3"><a href="/"><img src="/assets/ewu-logo.svg" alt="EWU" class="ewu-logo"></a><h1 class="text-xl font-bold text-white">Student Dashboard</h1></div>
       <p id="class_sub" class="text-gray-500 text-xs">Automated Technical Screening Platform</p>
     </div>
     <div class="flex items-center gap-4">
@@ -188,12 +190,12 @@
 </div>
 
 <script>
-const API       = 'https://screening-platform-tpku.onrender.com';
+const API       = location.origin;
 const token     = localStorage.getItem('token');
 const studentId = localStorage.getItem('student_id');
 const fullName  = localStorage.getItem('full_name');
 
-if (!token) window.location.href = '/';
+if (!token) window.location.href = '/student/login';
 
 // Fill info
 document.getElementById('student_name').textContent       = fullName || '';
@@ -314,12 +316,13 @@ function logout() {
   el.classList.remove('hidden');
   setTimeout(() => {
     localStorage.clear();
-    window.location.href = '/';
+    window.location.href = '/student/login';
   }, 2000);
 }
 
 checkStatus();
 setInterval(checkStatus, 5000);
 </script>
+<script src="/assets/ewu.js"></script>
 </body>
 </html>
