@@ -59,7 +59,7 @@
 <div class="max-w-screen-xl mx-auto p-5">
 
   <!-- CLASSES — Semester -> Course -> Section (Classroom style) -->
-  <section class="mb-8">
+  <section id="classes_section" class="mb-8">
     <div class="flex items-center justify-between mb-4 flex-wrap gap-3">
       <div>
         <h2 class="text-white font-semibold text-lg">My Classes</h2>
@@ -75,8 +75,17 @@
     </div>
   </section>
 
+  <!-- Shown instead of the classes grid while monitoring one class -->
+  <div id="class_view_banner" class="hidden mb-6 flex items-center justify-between bg-gray-900 border border-gray-800 rounded-xl px-4 py-3">
+    <div class="flex items-center gap-3">
+      <button onclick="exitClassView()" class="text-blue-400 hover:underline text-sm font-medium">&larr; Back to Classes</button>
+      <span class="text-gray-600">|</span>
+      <span id="class_view_title" class="text-white font-semibold text-sm"></span>
+    </div>
+  </div>
+
   <!-- SECTION 4 — Summary stats -->
-  <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+  <div id="summary_stats" class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
     <div class="bg-gray-900 rounded-xl p-4 border border-green-800">
       <p class="text-gray-400 text-xs mb-1">Students Online</p>
       <p class="text-3xl font-bold text-green-400"><span id="s_online">—</span><span class="text-base text-gray-500 font-normal"> / <span id="s_total">—</span></span></p>
@@ -124,6 +133,8 @@
             <th class="text-center font-medium px-4 py-2">Status</th>
             <th class="text-center font-medium px-4 py-2">Suspicion</th>
             <th class="text-left font-medium px-4 py-2">Last Heartbeat</th>
+            <th class="text-left font-medium px-4 py-2">Time Active</th>
+            <th class="text-center font-medium px-4 py-2">Submitted</th>
             <th class="text-right font-medium px-4 py-2">Quick Actions</th>
           </tr>
         </thead>
@@ -658,6 +669,10 @@ function classCard(c) {
     <div class="p-4 space-y-3 flex-1">
       <div class="flex items-center justify-between text-sm">
         <span class="text-gray-300">👥 ${c.student_count} student${c.student_count === 1 ? '' : 's'}</span>
+        <span class="text-green-400 text-xs font-medium">● ${c.connected_count || 0} connected</span>
+      </div>
+      <div class="flex items-center justify-between text-sm">
+        <span></span>
         ${live ? '<span class="px-2 py-0.5 rounded-full text-xs font-medium bg-green-900 text-green-300">● Lab running</span>' : ''}
       </div>
       <div class="flex items-center gap-2">
@@ -818,11 +833,37 @@ function monitorThisClass(id) {
   document.getElementById('class_filter').value = monitorClass;
   const examSel = document.getElementById('exam_class');
   if ([...examSel.options].some(o => o.value === monitorClass)) examSel.value = monitorClass;
+  enterClassView();
   loadStudents().then(() => document.getElementById('student_rows').scrollIntoView({ behavior: 'smooth', block: 'center' }));
 }
 function onClassFilter() {
   monitorClass = document.getElementById('class_filter').value;
+  if (monitorClass) enterClassView(); else exitClassView(false);
   loadStudents();
+}
+function enterClassView() {
+  const c = classes.find(c => String(c.id) === monitorClass);
+  document.getElementById('classes_section').classList.add('hidden');
+  const banner = document.getElementById('class_view_banner');
+  banner.classList.remove('hidden');
+  document.getElementById('class_view_title').textContent = c
+    ? `${c.course_name} · Section ${c.section} (${c.semester})` : 'Class';
+}
+function exitClassView(clearFilter = true) {
+  document.getElementById('classes_section').classList.remove('hidden');
+  document.getElementById('class_view_banner').classList.add('hidden');
+  if (clearFilter) {
+    monitorClass = '';
+    document.getElementById('class_filter').value = '';
+    loadStudents();
+  }
+}
+function fmtDuration(seconds) {
+  if (seconds === null || seconds === undefined) return '—';
+  const m = Math.floor(seconds / 60), h = Math.floor(m / 60);
+  if (h > 0) return `${h}h ${m % 60}m`;
+  if (m > 0) return `${m}m ${seconds % 60}s`;
+  return `${seconds}s`;
 }
 
 // create class
@@ -983,7 +1024,7 @@ function renderStudents() {
 
   const body = document.getElementById('student_rows');
   if (!rows.length) {
-    body.innerHTML = `<tr><td colspan="7" class="p-8 text-center text-gray-500">No students match this filter.</td></tr>`;
+    body.innerHTML = `<tr><td colspan="9" class="p-8 text-center text-gray-500">No students match this filter.</td></tr>`;
     return;
   }
   body.innerHTML = rows.map(s => {
@@ -1002,12 +1043,16 @@ function renderStudents() {
         <div class="w-20 h-1.5 bg-gray-800 rounded-full overflow-hidden"><div class="h-full ${barColor(n)}" style="width:${Math.min(100, n)}%"></div></div>
         <span class="text-xs font-bold w-7 ${scoreColor(n)}">${n}</span></div></td>
       <td class="px-4 py-3 text-gray-400 text-xs">${esc(ago(s.last_heartbeat))}</td>
+      <td class="px-4 py-3 text-gray-400 text-xs">${fmtDuration(s.active_seconds)}</td>
+      <td class="px-4 py-3 text-center">${s.has_submitted
+        ? '<span class="text-green-400 text-xs font-medium">✔ Submitted</span>'
+        : '<span class="text-gray-500 text-xs">—</span>'}</td>
       <td class="px-4 py-3 text-right whitespace-nowrap" onclick="event.stopPropagation()">
         <button onclick="warnStudent('${id}')" class="px-2 py-1 rounded text-xs bg-yellow-700 hover:bg-yellow-600 text-white">Warn</button>
         <button onclick="disconnectStudent('${id}')" class="px-2 py-1 rounded text-xs bg-red-700 hover:bg-red-600 text-white">Disconnect</button>
         <button onclick="openReport('${id}')" class="px-2 py-1 rounded text-xs bg-gray-700 hover:bg-gray-600 text-white">Report</button>
       </td></tr>
-      <tr id="file_rows_${id}" class="${expanded ? '' : 'hidden'}"><td colspan="7" class="px-4 pb-3 pt-0 bg-gray-950/60">
+      <tr id="file_rows_${id}" class="${expanded ? '' : 'hidden'}"><td colspan="9" class="px-4 pb-3 pt-0 bg-gray-950/60">
         <div id="file_rows_body_${id}" class="text-xs text-gray-500 py-2">Loading files…</div>
       </td></tr>`;
   }).join('');

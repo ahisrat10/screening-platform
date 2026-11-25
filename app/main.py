@@ -1431,6 +1431,10 @@ def get_all_students(db: Session = Depends(get_db), admin = Depends(auth.get_adm
     students = db.query(models.User).filter(models.User.role == "student").all()
     result   = []
 
+    class_ids_by_student = {}
+    for class_id, student_id in db.query(models.ClassMember.class_id, models.ClassMember.student_id).all():
+        class_ids_by_student.setdefault(student_id, []).append(class_id)
+
     for student in students:
         session = db.query(models.StudentSession).filter(
             models.StudentSession.student_id == student.student_id
@@ -1476,6 +1480,7 @@ def get_all_students(db: Session = Depends(get_db), admin = Depends(auth.get_adm
             "paste_count":      paste_count,
             "tab_switches":     tab_count,
             "snapshots":        snap_count,
+            "class_ids":        class_ids_by_student.get(student.student_id, []),
         })
 
     return result

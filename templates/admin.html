@@ -76,6 +76,31 @@
     </div>
   </section>
 
+  <!-- Live Monitor — all students, all classes -->
+  <section class="bg-gray-900 rounded-xl border border-gray-800">
+    <div class="p-4 border-b border-gray-800 flex justify-between items-center gap-3 flex-wrap">
+      <h2 class="text-white text-lg">Live Monitor <span class="text-gray-500 font-normal text-sm">(all classes)</span></h2>
+      <select id="monitor_class_filter" onchange="renderMonitor()" aria-label="Filter by class"
+        class="bg-gray-800 text-white text-sm px-3 py-2 rounded-lg border border-gray-700 focus:outline-none focus:border-blue-500 max-w-[16rem]">
+        <option value="">All classes</option>
+      </select>
+    </div>
+    <div class="overflow-x-auto max-h-96 overflow-y-auto">
+      <table class="w-full text-sm min-w-[640px]">
+        <thead>
+          <tr class="text-gray-500 text-xs uppercase border-b border-gray-800 text-left">
+            <th class="px-4 py-3 font-medium">Name</th>
+            <th class="px-4 py-3 font-medium">ID</th>
+            <th class="px-4 py-3 font-medium text-center">Status</th>
+            <th class="px-4 py-3 font-medium text-center">Suspicion</th>
+            <th class="px-4 py-3 font-medium">Last heartbeat</th>
+          </tr>
+        </thead>
+        <tbody id="monitor_rows"><tr><td colspan="5" class="px-4 py-10 text-center text-gray-500">Loading…</td></tr></tbody>
+      </table>
+    </div>
+  </section>
+
   <!-- Users -->
   <section class="bg-gray-900 rounded-xl border border-gray-800">
     <div class="p-4 border-b border-gray-800 flex justify-between items-center gap-3 flex-wrap">
@@ -306,6 +331,43 @@ document.getElementById('ov_dataset_rows').addEventListener('click', async (e) =
   } catch (err) { banner(err.message, 'err'); }
 });
 
+// ── live monitor: all students, all classes, with a class filter ──
+let monitorStudents = [];
+let monitorClasses  = [];
+async function loadMonitor() {
+  try {
+    const [students, classes] = await Promise.all([getJSON('/admin/all-students'), getJSON('/teacher/classes')]);
+    monitorStudents = students;
+    monitorClasses  = classes;
+    const sel = document.getElementById('monitor_class_filter');
+    const keep = sel.value;
+    sel.innerHTML = '<option value="">All classes</option>' + classes.map(c =>
+      `<option value="${c.id}">${esc(c.course_name)} · ${esc(c.section)} (${esc(c.semester)})</option>`).join('');
+    if (keep && classes.some(c => String(c.id) === keep)) sel.value = keep;
+    renderMonitor();
+  } catch (e) { document.getElementById('monitor_rows').innerHTML = `<tr><td colspan="5" class="px-4 py-10 text-center text-red-400">${esc(e.message)}</td></tr>`; }
+}
+function renderMonitor() {
+  const classId = document.getElementById('monitor_class_filter').value;
+  const rows = monitorStudents
+    .filter(s => !classId || (s.class_ids || []).map(String).includes(classId))
+    .sort((a, b) => (b.is_connected - a.is_connected) || (b.suspicious_score - a.suspicious_score));
+  const body = document.getElementById('monitor_rows');
+  if (!rows.length) {
+    body.innerHTML = `<tr><td colspan="5" class="px-4 py-10 text-center text-gray-500">No students match this filter.</td></tr>`;
+    return;
+  }
+  body.innerHTML = rows.map(s => `<tr class="border-t border-gray-800">
+    <td class="px-4 py-2 text-white">${esc(s.full_name || '—')}</td>
+    <td class="px-4 py-2 text-gray-400">${esc(s.student_id)}</td>
+    <td class="px-4 py-2 text-center">${s.is_connected
+      ? '<span class="inline-flex items-center gap-1.5 text-green-400 text-xs"><span class="w-2 h-2 rounded-full bg-green-400"></span>Online</span>'
+      : '<span class="inline-flex items-center gap-1.5 text-gray-500 text-xs"><span class="w-2 h-2 rounded-full bg-gray-600"></span>Offline</span>'}</td>
+    <td class="px-4 py-2 text-center font-bold ${s.suspicious_score >= 60 ? 'text-red-400' : s.suspicious_score >= 30 ? 'text-yellow-400' : 'text-gray-400'}">${s.suspicious_score || 0}</td>
+    <td class="px-4 py-2 text-gray-400 text-xs">${esc(ago(s.last_heartbeat))}</td>
+  </tr>`).join('');
+}
+
 // ── teacher sign-up code ───────────────────────────────────────
 async function loadTeacherCode() {
   try { document.getElementById('teacher_code_input').value = (await getJSON('/admin/teacher-code')).code || ''; } catch (e) {}
@@ -507,8 +569,8 @@ document.getElementById('reset2_form').addEventListener('submit', async (e) => {
 // ── boot ───────────────────────────────────────────────────────
 if (token && role === 'admin') {
   loadTeacherCode();
-  setInterval(() => { if (!document.hidden) loadOverview(); }, 30000);
-  Promise.allSettled([loadOverview(), loadUsers()]).then(rs => {
+  setInterval(() => { if (!document.hidden) { loadOverview(); loadMonitor(); } }, 30000);
+  Promise.allSettled([loadOverview(), loadUsers(), loadMonitor()]).then(rs => {
     const f = rs.find(r => r.status === 'rejected');
     if (f) banner(f.reason.message, 'err');
   });

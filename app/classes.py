@@ -116,8 +116,18 @@ def _member_count(db: Session, class_id: int) -> int:
     return db.query(models.ClassMember).filter(models.ClassMember.class_id == class_id).count()
 
 
+def _connected_count(db: Session, class_id: int) -> int:
+    member_ids = db.query(models.ClassMember.student_id).filter(
+        models.ClassMember.class_id == class_id)
+    return db.query(models.StudentSession).filter(
+        models.StudentSession.student_id.in_(member_ids),
+        models.StudentSession.is_connected == True,  # noqa: E712
+    ).count()
+
+
 def _class_dict(db: Session, c: models.Classroom, teacher_name: Optional[str] = None,
-                count: Optional[int] = None, lab=None, include_code: bool = True) -> dict:
+                count: Optional[int] = None, lab=None, include_code: bool = True,
+                connected: Optional[int] = None) -> dict:
     out = {
         "id":                   c.id,
         "semester":             c.semester,
@@ -126,6 +136,7 @@ def _class_dict(db: Session, c: models.Classroom, teacher_name: Optional[str] = 
         "teacher_id":           c.teacher_id,
         "teacher_name":         teacher_name,
         "student_count":        count if count is not None else _member_count(db, c.id),
+        "connected_count":      connected if connected is not None else _connected_count(db, c.id),
         "ai_detection_enabled": bool(c.ai_detection_enabled),
         "created_at":           str(c.created_at),
         "active_lab":           {"id": lab.id, "started_at": str(lab.started_at)} if lab else None,
@@ -199,7 +210,13 @@ def list_classes(db: Session = Depends(get_db), teacher=Depends(auth.get_teacher
         models.LabSession.class_id.in_(ids), models.LabSession.is_active == True).all()}  # noqa: E712
     names = {u.student_id: u.full_name for u in db.query(models.User).filter(
         models.User.student_id.in_({c.teacher_id for c in classes})).all()}
-    return [_class_dict(db, c, names.get(c.teacher_id), counts.get(c.id, 0), labs.get(c.id)) for c in classes]
+    connected = dict(db.query(models.ClassMember.class_id, func.count(models.StudentSession.id)).join(
+        models.StudentSession, models.StudentSession.student_id == models.ClassMember.student_id
+    ).filter(
+        models.ClassMember.class_id.in_(ids), models.StudentSession.is_connected == True,  # noqa: E712
+    ).group_by(models.ClassMember.class_id).all())
+    return [_class_dict(db, c, names.get(c.teacher_id), counts.get(c.id, 0), labs.get(c.id),
+                        connected=connected.get(c.id, 0)) for c in classes]
 
 
 @router.post("/teacher/classes")
@@ -307,17 +324,27 @@ def class_students(class_id: int, db: Session = Depends(get_db), teacher=Depends
     members = db.query(models.User).join(
         models.ClassMember, models.ClassMember.student_id == models.User.student_id
     ).filter(models.ClassMember.class_id == c.id).all()
+    member_ids = [s.student_id for s in members]
+    submitted_ids = {sid for (sid,) in db.query(models.CodeSnapshot.student_id).filter(
+        models.CodeSnapshot.student_id.in_(member_ids)).distinct().all()} if member_ids else set()
     rows = []
     for s in members:
         session = db.query(models.StudentSession).filter(
             models.StudentSession.student_id == s.student_id).first()
+        live = _is_live(session)
+        active_seconds = None
+        if session and session.connected_at:
+            end = session.disconnected_at if not live and session.disconnected_at else datetime.utcnow()
+            active_seconds = max(0, int((end - session.connected_at).total_seconds()))
         rows.append({
             "student_id":       s.student_id,
             "full_name":        s.full_name,
             "session_id":       session.id if session else None,
-            "is_connected":     _is_live(session),
+            "is_connected":     live,
             "suspicious_score": (session.suspicious_score or 0) if session else 0,
             "last_heartbeat":   str(session.last_heartbeat) if session and session.last_heartbeat else None,
+            "active_seconds":   active_seconds,
+            "has_submitted":    s.student_id in submitted_ids,
         })
     return rows
 
