@@ -805,12 +805,17 @@ def heartbeat(
         db.commit()
         return {"status": "disconnected", "force_disconnect": True}
 
+    # suspicious_score is set by the extension client; clamp to the documented
+    # 0-100 range so a stale/modified client can't push an out-of-range value
+    # into the dashboards or the fusion model's feature vector.
+    clamped_score = max(0, min(100, data.suspicious_score))
+
     hb = models.Heartbeat(
         student_id        = data.student_id,
         is_typing         = data.is_typing,
         is_idle           = data.is_idle,
         is_window_focused = data.is_window_focused,
-        suspicious_score  = data.suspicious_score
+        suspicious_score  = clamped_score
     )
     db.add(hb)
 
@@ -819,7 +824,7 @@ def heartbeat(
     ).first()
     if session:
         session.last_heartbeat   = datetime.utcnow()
-        session.suspicious_score = data.suspicious_score
+        session.suspicious_score = clamped_score
         session.is_connected     = True
     else:
         session = models.StudentSession(
@@ -827,7 +832,7 @@ def heartbeat(
             is_connected     = True,
             connected_at     = datetime.utcnow(),
             last_heartbeat   = datetime.utcnow(),
-            suspicious_score = data.suspicious_score
+            suspicious_score = clamped_score
         )
         db.add(session)
 

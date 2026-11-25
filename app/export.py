@@ -27,26 +27,28 @@ router = APIRouter(tags=["export"])
 
 EXPORT_VERSION = "1.0"
 
-# ── rate limit: 10 exports / hour / admin ──────────────────────
+# ── rate limit: 60 exports / hour / admin / endpoint ────────────
 # In-memory (per process): resets on restart and isn't shared between workers,
-# same limitation as the OTP limiter.
-_EXPORT_LIMIT = 10
+# same limitation as the OTP limiter. Keyed per-endpoint so working through
+# the Datasets panel's six buttons doesn't exhaust a shared quota.
+_EXPORT_LIMIT = 60
 _EXPORT_WINDOW_SEC = 3600
 _export_calls: dict = {}
 
 
-def _check_rate_limit(admin_id: str):
+def _check_rate_limit(admin_id: str, endpoint: str):
+    key = f"{admin_id}:{endpoint}"
     now = time.time()
-    calls = [t for t in _export_calls.get(admin_id, []) if now - t < _EXPORT_WINDOW_SEC]
+    calls = [t for t in _export_calls.get(key, []) if now - t < _EXPORT_WINDOW_SEC]
     if len(calls) >= _EXPORT_LIMIT:
         retry = int(_EXPORT_WINDOW_SEC - (now - calls[0])) + 1
         raise HTTPException(
             status_code=429,
-            detail=f"Export limit reached ({_EXPORT_LIMIT} per hour). Try again in {retry // 60 + 1} minutes.",
+            detail=f"Export limit reached ({_EXPORT_LIMIT} per hour for this export). Try again in {retry // 60 + 1} minutes.",
             headers={"Retry-After": str(retry)},
         )
     calls.append(now)
-    _export_calls[admin_id] = calls
+    _export_calls[key] = calls
 
 
 # ── small null-safe helpers ────────────────────────────────────
@@ -247,8 +249,8 @@ def _validate_date_filter(date: Optional[str]) -> Optional[str]:
     return date
 
 
-def _export(db: Session, admin, labeled_only: bool, date: Optional[str] = None) -> Response:
-    _check_rate_limit(admin.student_id)
+def _export(db: Session, admin, labeled_only: bool, date: Optional[str] = None, endpoint: str = "dataset") -> Response:
+    _check_rate_limit(admin.student_id, endpoint)
     date = _validate_date_filter(date)
 
     students = {u.student_id: u for u in db.query(models.User).filter(models.User.role == "student").all()}
@@ -292,7 +294,7 @@ def export_dataset_json(
     db: Session = Depends(get_db),
     admin = Depends(auth.get_admin_user),
 ):
-    return _export(db, admin, labeled_only=True, date=date)
+    return _export(db, admin, labeled_only=True, date=date, endpoint="dataset")
 
 
 @router.get("/admin/export/all-sessions")
@@ -301,7 +303,7 @@ def export_all_sessions(
     db: Session = Depends(get_db),
     admin = Depends(auth.get_admin_user),
 ):
-    return _export(db, admin, labeled_only=False, date=date)
+    return _export(db, admin, labeled_only=False, date=date, endpoint="all-sessions")
 
 
 # ══════════════════════════════════════════════════════════════
@@ -451,7 +453,7 @@ def export_flat_all(
     db: Session = Depends(get_db),
     admin = Depends(auth.get_admin_user),
 ):
-    _check_rate_limit(admin.student_id)
+    _check_rate_limit(admin.student_id, "flat-all")
     rows = _all_sessions_rows(db)
     return _respond_rows(rows, format, f"codeverity-all-{datetime.utcnow().strftime('%Y-%m-%d')}")
 
@@ -464,7 +466,7 @@ def export_flat_daterange(
     db: Session = Depends(get_db),
     admin = Depends(auth.get_admin_user),
 ):
-    _check_rate_limit(admin.student_id)
+    _check_rate_limit(admin.student_id, "flat-daterange")
     _validate_date_filter(start)
     _validate_date_filter(end)
     since = datetime.strptime(start, "%Y-%m-%d")
@@ -480,7 +482,7 @@ def export_flat_class(
     db: Session = Depends(get_db),
     admin = Depends(auth.get_admin_user),
 ):
-    _check_rate_limit(admin.student_id)
+    _check_rate_limit(admin.student_id, "flat-class")
     c = db.query(models.Classroom).filter(models.Classroom.id == class_id).first()
     if not c:
         raise HTTPException(status_code=404, detail="Class not found")
@@ -498,7 +500,7 @@ def export_flat_student(
     db: Session = Depends(get_db),
     admin = Depends(auth.get_admin_user),
 ):
-    _check_rate_limit(admin.student_id)
+    _check_rate_limit(admin.student_id, "flat-student")
     rows = _all_sessions_rows(db, anonymized=anonymized, student_ids=[student_id])
     if not rows:
         user = db.query(models.User).filter(models.User.student_id == student_id).first()
@@ -513,7 +515,7 @@ def export_flat_flagged(
     db: Session = Depends(get_db),
     admin = Depends(auth.get_admin_user),
 ):
-    _check_rate_limit(admin.student_id)
+    _check_rate_limit(admin.student_id, "flat-flagged")
     rows = _all_sessions_rows(db)
     rows = [r for r in rows if (r.get("ai_probability") or 0) > 0.5 or r.get("teacher_label") == "ai"]
     return _respond_rows(rows, format, f"codeverity-flagged-{datetime.utcnow().strftime('%Y-%m-%d')}")
@@ -525,7 +527,7 @@ def export_flat_labeled(
     db: Session = Depends(get_db),
     admin = Depends(auth.get_admin_user),
 ):
-    _check_rate_limit(admin.student_id)
+    _check_rate_limit(admin.student_id, "flat-labeled")
     rows = _all_sessions_rows(db)
     rows = [r for r in rows if r.get("teacher_label")]
     return _respond_rows(rows, format, f"codeverity-labeled-{datetime.utcnow().strftime('%Y-%m-%d')}")

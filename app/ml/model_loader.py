@@ -177,7 +177,11 @@ def predict_ai_detection(
         "typing_ratio":    sig["typing_ratio"],
         "tab_switch":      sig["tab_switches"],
         "backspace_freq":  sig["backspace_freq"],
-        "suspicion_score": sig["suspicion_score"],
+        # suspicion_score is 0-100 everywhere else in the app; scaler_fusion
+        # was fit expecting a 0-1 value here (same convention as
+        # behavioral_risk_score in behavioral.py), so normalize just for
+        # this model input, not for storage/display.
+        "suspicion_score": (sig["suspicion_score"] or 0) / 100,
     }
 
     fusion_prob = _fusion_score(

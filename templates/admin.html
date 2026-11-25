@@ -493,6 +493,9 @@ function renderMonitor() {
 
 // ── dataset exports ─────────────────────────────────────────────
 async function downloadExport(path, fmt) {
+  const btn = window.event ? window.event.target : null;
+  const prevLabel = btn ? btn.textContent : null;
+  if (btn) { btn.disabled = true; btn.textContent = '...'; btn.classList.add('opacity-50', 'cursor-not-allowed'); }
   try {
     const url = `${path}?format=${fmt}`;
     const blob = await (await request(url)).blob();
@@ -500,6 +503,9 @@ async function downloadExport(path, fmt) {
     a.download = ''; document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(a.href), 2000);
   } catch (e) { banner(e.message, 'err'); }
+  finally {
+    if (btn) { btn.disabled = false; btn.textContent = prevLabel; btn.classList.remove('opacity-50', 'cursor-not-allowed'); }
+  }
 }
 function downloadDateRange(fmt) {
   const start = document.getElementById('ds_start').value, end = document.getElementById('ds_end').value;
